@@ -1,0 +1,31 @@
+name: daily-swarm
+
+on:
+  schedule:
+    # 06:15 ET — after arXiv's midnight refresh, before the 08:45 posting slot.
+    - cron: "15 11 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip all model calls"
+        type: boolean
+        default: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - name: Run pipeline
+        env:
+          XSWARM_DATABASE_URL: ${{ secrets.XSWARM_DATABASE_URL }}
+          XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
+          XSWARM_ANTHROPIC_API_KEY: ${{ secrets.XSWARM_ANTHROPIC_API_KEY }}
+          XSWARM_SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.XSWARM_SEMANTIC_SCHOLAR_API_KEY }}
+          XSWARM_HF_TOKEN: ${{ secrets.XSWARM_HF_TOKEN }}
+          XSWARM_GITHUB_TOKEN: ${{ github.token }}
+        run: xswarm run ${{ inputs.dry_run && '--dry-run' || '' }}

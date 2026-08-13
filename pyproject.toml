@@ -1,0 +1,48 @@
+[project]
+name = "xswarm"
+version = "0.1.0"
+description = "Agent swarm that reads the ML frontier and drafts posts for an X account"
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "httpx>=0.27",
+    "feedparser>=6.0",
+    "rapidfuzz>=3.9",
+    "typer>=0.12",
+    "rich>=13.7",
+    "python-dateutil>=2.9",
+    "anthropic>=0.34",
+    "openai>=1.40",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2", "ruff>=0.5", "respx>=0.21"]
+
+[project.scripts]
+xswarm = "xswarm.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# typer's declarative option style requires calls in argument defaults
+"src/xswarm/cli.py" = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
