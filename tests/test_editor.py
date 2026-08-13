@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from conftest import make_draft
 
 from xswarm.agents.editor import deterministic_checks
@@ -32,11 +33,34 @@ def test_blocks_banned_phrase(brief):
     assert any("banned phrase" in n for n in deterministic_checks(draft, brief, []))
 
 
-def test_blocks_fabricated_firsthand_experience(brief):
-    draft = make_draft(brief, "I ran this locally and it held up.", alt_text="chart")
+FABRICATED = [
+    "I ran this locally and it held up.",
+    "In my tests the tool calls stayed reliable.",
+    "I've run it on 4 GPUs.",
+    "I have tested this in prod.",
+    "I spun it up locally.",
+    "My benchmarks show the same gap.",
+]
+
+# Ordinary operator vocabulary that must survive the gate.
+NOT_FABRICATED = [
+    "We ran out of memory at 32k context.",
+    "I ran into the same wall last year.",
+    "The authors ran 3 seeds.",
+    "In my experience, retries cover most of this.",
+]
+
+
+@pytest.mark.parametrize("body", FABRICATED)
+def test_blocks_fabricated_firsthand_experience(brief, body):
+    draft = make_draft(brief, body, alt_text="chart")
     assert any("first-hand" in n for n in deterministic_checks(draft, brief, []))
-    draft = make_draft(brief, "In my tests the tool calls stayed reliable.", alt_text="chart")
-    assert any("first-hand" in n for n in deterministic_checks(draft, brief, []))
+
+
+@pytest.mark.parametrize("body", NOT_FABRICATED)
+def test_allows_operator_idioms(brief, body):
+    draft = make_draft(brief, body, alt_text="chart")
+    assert not any("first-hand" in n for n in deterministic_checks(draft, brief, []))
 
 
 def test_blocks_unverified_claim(brief):

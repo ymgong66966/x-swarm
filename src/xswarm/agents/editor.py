@@ -19,9 +19,16 @@ HASHTAG_RE = re.compile(r"(?:^|\s)#\w+")
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?")
 # First-person experience the account has not actually had. The voice is opinionated,
 # which makes it easy for the Writer to slide from "the paper reports" into "I ran it".
+_FIRSTHAND_VERBS = (
+    r"(?:ran|run|tested|reproduced|benchmarked|tried|deployed|measured|profiled|spun)"
+)
 FIRSTHAND_RE = re.compile(
-    r"\b(?:i|we)\s+(?:ran|tested|reproduced|benchmarked|tried|deployed|measured)\b"
-    r"|\bin (?:my|our) (?:tests?|experiments?|benchmarks?)\b",
+    # "I ran", "we've tested", "I have benchmarked" — but not the idioms
+    # "ran into", "ran out of", which are ordinary operator vocabulary.
+    rf"\b(?:i|we)(?:'ve|'d)?\s+(?:have\s+|had\s+)?{_FIRSTHAND_VERBS}\b"
+    r"(?!\s+(?:into|out of|up against|low on|short of))"
+    r"|\bin (?:my|our)(?: own)? (?:tests?|testing|experiments?|benchmarks?|runs?)\b"
+    r"|\b(?:my|our) (?:tests?|testing|experiments?|benchmarks?|runs?)\b",
     re.IGNORECASE,
 )
 DUPLICATE_THRESHOLD = 85
