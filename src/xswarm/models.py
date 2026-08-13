@@ -92,3 +92,65 @@ class Draft(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     brief: Mapped[Brief] = relationship(back_populates="drafts")
+    assets: Mapped[list[Asset]] = relationship(back_populates="draft")
+    publication: Mapped[Publication | None] = relationship(back_populates="draft", uselist=False)
+
+
+class Asset(Base):
+    """A rendered visual for a draft, on disk and ready to upload."""
+
+    __tablename__ = "assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    draft_id: Mapped[int] = mapped_column(ForeignKey("drafts.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    path: Mapped[str] = mapped_column(Text)
+    alt_text: Mapped[str] = mapped_column(Text, default="")
+    spec: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    draft: Mapped[Draft] = relationship(back_populates="assets")
+
+
+class Publication(Base):
+    """A draft handed to the publishing provider (Typefully), and where it landed."""
+
+    __tablename__ = "publications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    draft_id: Mapped[int] = mapped_column(ForeignKey("drafts.id"), index=True, unique=True)
+    provider: Mapped[str] = mapped_column(String(32), default="typefully")
+    provider_draft_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    post_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    post_url: Mapped[str | None] = mapped_column(Text)
+    scheduled_for: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    draft: Mapped[Draft] = relationship(back_populates="publication")
+    metrics: Mapped[list[PostMetric]] = relationship(back_populates="publication")
+
+
+class PostMetric(Base):
+    """One analytics snapshot of a published post. Kept as a time series so the
+    Strategist can compare like-for-like at a fixed age (24h)."""
+
+    __tablename__ = "post_metrics"
+    __table_args__ = (
+        UniqueConstraint("publication_id", "captured_at", name="uq_metric_snapshot"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    publication_id: Mapped[int] = mapped_column(ForeignKey("publications.id"), index=True)
+    captured_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    impressions: Mapped[int] = mapped_column(Integer, default=0)
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    replies: Mapped[int] = mapped_column(Integer, default=0)
+    reposts: Mapped[int] = mapped_column(Integer, default=0)
+    quotes: Mapped[int] = mapped_column(Integer, default=0)
+    bookmarks: Mapped[int] = mapped_column(Integer, default=0)
+    link_clicks: Mapped[int] = mapped_column(Integer, default=0)
+    profile_clicks: Mapped[int] = mapped_column(Integer, default=0)
+
+    publication: Mapped[Publication] = relationship(back_populates="metrics")

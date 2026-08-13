@@ -72,6 +72,26 @@ class Settings(BaseSettings):
         ]
     )
 
+    # Visuals
+    assets_dir: Path = REPO_ROOT / "assets"
+    visual_width_px: int = 1600
+    visual_height_px: int = 900
+
+    # Publishing (Typefully v2). Without a key the Publisher stays in dry-run.
+    typefully_api_key: str | None = None
+    typefully_social_set_id: str | None = None
+    typefully_base_url: str = "https://api.typefully.com/v2"
+    publish_timezone: str = "America/New_York"
+    # Local-time slots the Publisher schedules into, in order.
+    publish_slots: list[str] = Field(default=["08:45", "12:30", "17:00"])
+    publish_jitter_minutes: int = 7
+    # Pillars that may be scheduled without a human approving them first.
+    autopublish_pillars: list[str] = Field(default=[])
+
+    # Measurement / strategy
+    metrics_lookback_days: int = 14
+    strategy_min_posts: int = 8
+
     voice_path: Path = REPO_ROOT / "voice.md"
     playbook_path: Path = REPO_ROOT / "playbook.md"
     prompts_dir: Path = REPO_ROOT / "prompts"
