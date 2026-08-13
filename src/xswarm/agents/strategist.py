@@ -124,6 +124,7 @@ def run(session: Session, llm: LLM, *, days: int = 28, write_playbook: bool = Tr
         ),
         strong=True,
         max_tokens=2500,
+        agent="strategist",
     )
     if not updated:
         return report(groups)

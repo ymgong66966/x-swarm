@@ -1,7 +1,19 @@
-from . import analyst, curator, editor, measurer, publisher, scout, strategist, visualizer, writer
+from . import (
+    analyst,
+    composer,
+    curator,
+    editor,
+    measurer,
+    publisher,
+    scout,
+    strategist,
+    visualizer,
+    writer,
+)
 
 __all__ = [
     "analyst",
+    "composer",
     "curator",
     "editor",
     "measurer",

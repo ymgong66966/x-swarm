@@ -76,14 +76,20 @@ class Brief(Base):
 
 
 class Draft(Base):
-    """One Writer variant, plus the Editor's verdict."""
+    """One Writer variant, plus the Editor's verdict.
+
+    `brief_id` is nullable because a weekly roundup is about the week, not about one
+    item; those drafts carry their grounding in `features["grounding"]` instead.
+    """
 
     __tablename__ = "drafts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    brief_id: Mapped[int] = mapped_column(ForeignKey("briefs.id"), index=True)
+    brief_id: Mapped[int | None] = mapped_column(ForeignKey("briefs.id"), index=True)
     variant: Mapped[int] = mapped_column(Integer, default=0)
     body: Mapped[str] = mapped_column(Text)
+    # Posts 2..n of a thread. The link reply is always appended after these.
+    thread: Mapped[list[str]] = mapped_column(default=list)
     link_reply: Mapped[str] = mapped_column(Text, default="")
     alt_text: Mapped[str] = mapped_column(Text, default="")
     features: Mapped[dict[str, Any]] = mapped_column(default=dict)
@@ -91,7 +97,7 @@ class Draft(Base):
     editor_notes: Mapped[list[str]] = mapped_column(default=list)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    brief: Mapped[Brief] = relationship(back_populates="drafts")
+    brief: Mapped[Brief | None] = relationship(back_populates="drafts")
     assets: Mapped[list[Asset]] = relationship(back_populates="draft")
     publication: Mapped[Publication | None] = relationship(back_populates="draft", uselist=False)
 
@@ -130,6 +136,22 @@ class Publication(Base):
 
     draft: Mapped[Draft] = relationship(back_populates="publication")
     metrics: Mapped[list[PostMetric]] = relationship(back_populates="publication")
+
+
+class ModelCall(Base):
+    """One billed model call. Kept per agent so `xswarm cost` can answer "which stage
+    is eating the budget" rather than just "we spent $X"."""
+
+    __tablename__ = "model_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_date: Mapped[dt.date] = mapped_column(index=True)
+    agent: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(64))
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class PostMetric(Base):

@@ -46,6 +46,7 @@ def analyze(candidate: Candidate, llm: LLM) -> Brief:
         ),
         strong=True,
         max_tokens=2000,
+        agent="analyst",
     )
     if not isinstance(payload, dict):
         return _fallback_brief(candidate)

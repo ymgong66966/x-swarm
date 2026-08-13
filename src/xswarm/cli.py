@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
+from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from . import costs
 from .agents import (
     analyst,
+    composer,
     curator,
     editor,
     measurer,
@@ -20,9 +24,19 @@ from .agents import (
 )
 from .config import settings
 from .db import init_db, session_scope
+from .evals import harness
 from .graph import run_pipeline
 from .llm import LLM
-from .models import Asset, Brief, Candidate, Draft, Item, PostMetric, Publication
+from .models import (
+    Asset,
+    Brief,
+    Candidate,
+    Draft,
+    Item,
+    ModelCall,
+    PostMetric,
+    Publication,
+)
 
 app = typer.Typer(help="Agent swarm for an ML-frontier X account", no_args_is_help=True)
 console = Console()
@@ -83,7 +97,9 @@ def draft_cmd(dry_run: bool = False, verbose: bool = False) -> None:
         )
         briefs = analyst.run(session, llm, candidates)
         drafts = writer.run(session, llm, briefs)
+        composer.run(session, llm, drafts)
         editor.run(session, llm, drafts)
+        costs.record(session, llm)
         _print_drafts(drafts)
 
 
@@ -97,11 +113,33 @@ def run_cmd(dry_run: bool = False, verbose: bool = False) -> None:
         f"candidates={len(state.get('candidate_ids', []))} "
         f"briefs={len(state.get('brief_ids', []))} "
         f"drafts={len(state.get('draft_ids', []))} "
+        f"threads={len(state.get('thread_ids', []))} "
         f"ready={len(state.get('ready_ids', []))} "
-        f"visuals={len(state.get('asset_ids', []))}"
+        f"visuals={len(state.get('asset_ids', []))} "
+        f"cost=${state.get('cost_usd', 0.0):.3f}"
     )
     with session_scope() as session:
         _print_drafts([session.get(Draft, did) for did in state.get("draft_ids", [])])
+
+
+@app.command("roundup")
+def roundup_cmd(dry_run: bool = False, verbose: bool = False) -> None:
+    """Compose the weekly curation thread from the last 7 days of candidates."""
+    _setup_logging(verbose)
+    init_db()
+    llm = LLM(dry_run=dry_run)
+    with session_scope() as session:
+        draft = composer.weekly_roundup(session, llm)
+        if draft is None:
+            console.print("[yellow]not enough candidates this week[/yellow]")
+            return
+        editor.run(session, llm, [draft])
+        costs.record(session, llm)
+        console.print(f"draft {draft.id} [{draft.status}]")
+        for index, post in enumerate([draft.body, *draft.thread]):
+            console.print(f"[bold]{index + 1}.[/bold] {post}")
+        if draft.editor_notes:
+            console.print(f"[red]{'; '.join(draft.editor_notes)}[/red]")
 
 
 @app.command("review")
@@ -217,7 +255,7 @@ def _print_candidates(candidates: list[Candidate]) -> None:
 
 
 def _print_drafts(drafts: list[Draft | None]) -> None:
-    table = Table("id", "status", "hook", "body", "notes")
+    table = Table("id", "status", "hook", "posts", "body", "notes")
     for draft in drafts:
         if draft is None:
             continue
@@ -225,10 +263,46 @@ def _print_drafts(drafts: list[Draft | None]) -> None:
             str(draft.id),
             draft.status,
             str(draft.features.get("hook_style", "")),
+            str(1 + len(draft.thread or [])),
             draft.body[:120],
             "; ".join(draft.editor_notes)[:60],
         )
     console.print(table)
+
+
+@app.command("cost")
+def cost_cmd(days: int = 30) -> None:
+    """Model spend per agent, and whether this month is on track for the budget."""
+    init_db()
+    with session_scope() as session:
+        table = Table("agent", "calls", "prompt tok", "completion tok", "usd")
+        for agent, calls, prompt, completion, usd in costs.by_agent(session, days=days):
+            table.add_row(agent, str(calls), f"{prompt:,}", f"{completion:,}", f"${usd:.3f}")
+        console.print(table)
+        mtd = costs.month_to_date(session)
+        projected = costs.projected_month(session)
+        colour = "red" if costs.over_budget(session) else "green"
+        console.print(
+            f"month to date ${mtd:.2f} | projected [{colour}]${projected:.2f}[/{colour}] "
+            f"of ${settings.monthly_budget_usd:.2f} budget"
+        )
+
+
+@app.command("eval")
+def eval_cmd(
+    dry_run: bool = True,
+    min_score: float = typer.Option(0.0, help="Exit non-zero below this overall score"),
+    json_out: str = typer.Option("", help="Write the full report as JSON here"),
+) -> None:
+    """Score the Writer and Editor against frozen briefs. No network unless --no-dry-run."""
+    report = harness.run_eval(dry_run=dry_run)
+    console.print(harness.format_report(report))
+    if json_out:
+        Path(json_out).write_text(json.dumps(report.to_dict(), indent=2))
+        console.print(f"wrote {json_out}")
+    if report.overall < min_score:
+        console.print(f"[red]overall {report.overall} below {min_score}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command("stats")
@@ -236,7 +310,7 @@ def stats_cmd() -> None:
     """Row counts, for sanity-checking a run."""
     init_db()
     with session_scope() as session:
-        for model in (Item, Candidate, Brief, Draft, Asset, Publication, PostMetric):
+        for model in (Item, Candidate, Brief, Draft, Asset, Publication, PostMetric, ModelCall):
             console.print(f"{model.__tablename__}: {session.query(model).count()}")
 
 

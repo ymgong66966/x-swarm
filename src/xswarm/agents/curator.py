@@ -8,6 +8,7 @@ from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import memory
 from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import Candidate, Item
@@ -90,7 +91,8 @@ def score_relevance(item: Item, llm: LLM) -> tuple[float, str]:
             title=item.title,
             summary=item.summary[:1500],
             source=item.source,
-        )
+        ),
+        agent="curator",
     )
     if isinstance(scored, dict) and "relevance" in scored:
         return float(scored["relevance"]), str(scored.get("rationale", ""))
@@ -129,6 +131,7 @@ def _pillar(item: Item) -> str:
 def run(session: Session, llm: LLM, run_date: dt.date | None = None) -> list[Candidate]:
     run_date = run_date or dt.date.today()
     history = _recent_titles(session)
+    covered = memory.covered_titles(session)
     already_scored = set(
         session.execute(
             select(Candidate.item_id).where(Candidate.run_date == run_date)
@@ -144,6 +147,9 @@ def run(session: Session, llm: LLM, run_date: dt.date | None = None) -> list[Can
 
     scored: list[tuple[float, dict, str, Item]] = []
     for item in items:
+        # Cheaper than an LLM call, and a topic we already posted cannot win today.
+        if memory.is_repeat(item.title, covered):
+            continue
         relevance, rationale = score_relevance(item, llm)
         subscores = {
             "momentum": score_momentum(item),

@@ -25,6 +25,18 @@ class Settings(BaseSettings):
     openai_fast_model: str = "gpt-4.1-mini"
     openai_strong_model: str = "gpt-4.1"
 
+    # USD per 1M tokens, (prompt, completion). Unknown models cost 0 rather than
+    # guessing; update this when you switch models.
+    model_prices: dict[str, tuple[float, float]] = Field(
+        default={
+            "gpt-4.1": (2.00, 8.00),
+            "gpt-4.1-mini": (0.40, 1.60),
+            "claude-sonnet-4-5": (3.00, 15.00),
+            "claude-3-5-haiku-latest": (0.80, 4.00),
+        }
+    )
+    monthly_budget_usd: float = 20.0
+
     semantic_scholar_api_key: str | None = None
     github_token: str | None = None
     hf_token: str | None = None
@@ -71,6 +83,13 @@ class Settings(BaseSettings):
             "delve",
         ]
     )
+
+    # Threads. Deliberately narrow: a thread is only worth a reader's time when the
+    # brief has enough verified material to carry it.
+    thread_pillars: list[str] = Field(default=["paper_of_the_day", "explainer"])
+    thread_min_claims: int = 4
+    max_thread_posts: int = 5
+    roundup_picks: int = 5
 
     # Visuals
     assets_dir: Path = REPO_ROOT / "assets"

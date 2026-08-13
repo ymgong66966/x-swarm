@@ -19,6 +19,7 @@ dependencies = [
     "anthropic>=0.34",
     "openai>=1.40",
     "matplotlib>=3.8",
+    "alembic>=1.13",
 ]
 
 [project.optional-dependencies]
@@ -34,9 +35,14 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+xswarm = ["evals/*.json"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Alembic generates these; leave them exactly as generated.
+extend-exclude = ["migrations/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

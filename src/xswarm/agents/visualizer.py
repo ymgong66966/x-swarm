@@ -52,6 +52,7 @@ def build_spec(draft: Draft, brief: Brief, llm: LLM) -> VisualSpec:
         ),
         strong=False,
         max_tokens=1200,
+        agent="visualizer",
     )
     if not isinstance(payload, dict):
         return _fallback_spec(draft, brief)
@@ -98,7 +99,9 @@ def _one_per_brief(drafts: list[Draft]) -> list[Draft]:
 
 
 def run(session: Session, llm: LLM, drafts: list[Draft]) -> list[Asset]:
-    assets = [visualize(session, draft, llm) for draft in _one_per_brief(drafts)]
+    # Roundup threads have no single brief to draw from; they ship text-only.
+    with_brief = [d for d in drafts if d.brief is not None]
+    assets = [visualize(session, draft, llm) for draft in _one_per_brief(with_brief)]
     session.flush()
     log.info("rendered %d visuals", len(assets))
     return assets
