@@ -28,6 +28,8 @@ RULES
 - The last post is the builder takeaway: what a reader should actually do with this.
 - No hashtags, no emoji, no links, no "1/", no "🧵", no numbering of any kind.
 - At most one em-dash per post; pileups read as LLM output and get blocked.
+- Write full sentences. Clipped verdict fragments and hedges ("I checked", "worth a look")
+  are blocked; when the thread praises something, quantify the praise from the brief.
 
 Reply with a JSON array of strings only:
 ["", ""]

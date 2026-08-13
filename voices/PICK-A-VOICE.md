@@ -1,5 +1,10 @@
 # Pick a voice
 
+> **Decided:** D (Operator) as the daily spine, B (Explainer) for weekly depth, A (Debugger)
+> only when a claim over-reaches and is reproducible. Praise is welcome but always quantified;
+> hedging tics and clipped verdict fragments are out. The result is `voice.md`; the cards below
+> are kept as the reference material behind that decision.
+
 You don't have to know your writing style. Pick the account you'd *want* to be read as, and
 we tune from there. Below: four archetypes drawn from accounts that actually work in ML
 Twitter, then the same two real briefs written in each one by the pipeline (not by hand —

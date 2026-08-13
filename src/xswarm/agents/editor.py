@@ -17,6 +17,13 @@ log = logging.getLogger(__name__)
 URL_RE = re.compile(r"https?://\S+")
 HASHTAG_RE = re.compile(r"(?:^|\s)#\w+")
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?")
+# First-person experience the account has not actually had. The voice is opinionated,
+# which makes it easy for the Writer to slide from "the paper reports" into "I ran it".
+FIRSTHAND_RE = re.compile(
+    r"\b(?:i|we)\s+(?:ran|tested|reproduced|benchmarked|tried|deployed|measured)\b"
+    r"|\bin (?:my|our) (?:tests?|experiments?|benchmarks?)\b",
+    re.IGNORECASE,
+)
 DUPLICATE_THRESHOLD = 85
 
 
@@ -71,6 +78,8 @@ def deterministic_checks(
         for phrase in settings.banned_phrases:
             if phrase.lower() in lowered_post:
                 notes.append(f"banned phrase in {label}: {phrase!r}")
+        if FIRSTHAND_RE.search(post):
+            notes.append(f"{label} claims first-hand experience the brief cannot support")
         if post.count("—") > 1:
             notes.append(f"em-dash cadence in {label} reads as LLM output")
         for number in set(NUMBER_RE.findall(post)):

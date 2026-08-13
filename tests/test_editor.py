@@ -32,6 +32,13 @@ def test_blocks_banned_phrase(brief):
     assert any("banned phrase" in n for n in deterministic_checks(draft, brief, []))
 
 
+def test_blocks_fabricated_firsthand_experience(brief):
+    draft = make_draft(brief, "I ran this locally and it held up.", alt_text="chart")
+    assert any("first-hand" in n for n in deterministic_checks(draft, brief, []))
+    draft = make_draft(brief, "In my tests the tool calls stayed reliable.", alt_text="chart")
+    assert any("first-hand" in n for n in deterministic_checks(draft, brief, []))
+
+
 def test_blocks_unverified_claim(brief):
     draft = make_draft(brief, "Works for any agent framework you use.", alt_text="chart")
     assert any("unverified" in n for n in deterministic_checks(draft, brief, []))

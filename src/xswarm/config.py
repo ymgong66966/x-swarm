@@ -81,6 +81,11 @@ class Settings(BaseSettings):
             "the future is here",
             "revolutionize",
             "delve",
+            # Hedging tics the account owner reads as posturing.
+            "i checked",
+            "i didn't check",
+            "i don't fully know",
+            "worth a look",
         ]
     )
 
