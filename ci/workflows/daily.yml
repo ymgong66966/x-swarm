@@ -14,6 +14,15 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    env:
+      XSWARM_DATABASE_URL: ${{ secrets.XSWARM_DATABASE_URL }}
+      XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
+      XSWARM_ANTHROPIC_API_KEY: ${{ secrets.XSWARM_ANTHROPIC_API_KEY }}
+      XSWARM_SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.XSWARM_SEMANTIC_SCHOLAR_API_KEY }}
+      XSWARM_HF_TOKEN: ${{ secrets.XSWARM_HF_TOKEN }}
+      XSWARM_GITHUB_TOKEN: ${{ github.token }}
+      XSWARM_TYPEFULLY_API_KEY: ${{ secrets.XSWARM_TYPEFULLY_API_KEY }}
+      XSWARM_TYPEFULLY_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_SOCIAL_SET_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,11 +30,18 @@ jobs:
           python-version: "3.11"
       - run: pip install -e .
       - name: Run pipeline
-        env:
-          XSWARM_DATABASE_URL: ${{ secrets.XSWARM_DATABASE_URL }}
-          XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
-          XSWARM_ANTHROPIC_API_KEY: ${{ secrets.XSWARM_ANTHROPIC_API_KEY }}
-          XSWARM_SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.XSWARM_SEMANTIC_SCHOLAR_API_KEY }}
-          XSWARM_HF_TOKEN: ${{ secrets.XSWARM_HF_TOKEN }}
-          XSWARM_GITHUB_TOKEN: ${{ github.token }}
         run: xswarm run ${{ inputs.dry_run && '--dry-run' || '' }}
+      # Schedules only what a human already approved in a previous run, and only as
+      # plan_at, so nothing goes out unattended.
+      - name: Queue approved drafts
+        if: ${{ !inputs.dry_run }}
+        run: xswarm publish
+      - name: Sync yesterday's analytics
+        if: ${{ !inputs.dry_run && env.XSWARM_TYPEFULLY_API_KEY != '' }}
+        run: xswarm sync-metrics
+      # Rendered cards are not committed; download them from the run to review.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visuals
+          path: assets/
+          if-no-files-found: ignore

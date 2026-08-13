@@ -6,7 +6,7 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from .agents import analyst, curator, editor, scout, writer
+from .agents import analyst, curator, editor, scout, visualizer, writer
 from .db import init_db, session_scope
 from .llm import LLM
 
@@ -26,6 +26,7 @@ class PipelineState(TypedDict, total=False):
     brief_ids: Annotated[list[int], _last]
     draft_ids: Annotated[list[int], _last]
     ready_ids: Annotated[list[int], _last]
+    asset_ids: Annotated[list[int], _last]
 
 
 def _llm(state: PipelineState) -> LLM:
@@ -71,6 +72,15 @@ def editor_node(state: PipelineState) -> PipelineState:
         return {"ready_ids": [d.id for d in reviewed if d.status == "ready_for_review"]}
 
 
+def visualizer_node(state: PipelineState) -> PipelineState:
+    from .models import Draft
+
+    with session_scope() as session:
+        drafts = [session.get(Draft, did) for did in state.get("ready_ids", [])]
+        assets = visualizer.run(session, _llm(state), [d for d in drafts if d])
+        return {"asset_ids": [a.id for a in assets]}
+
+
 def build_graph():
     graph = StateGraph(PipelineState)
     graph.add_node("scout", scout_node)
@@ -78,13 +88,17 @@ def build_graph():
     graph.add_node("analyst", analyst_node)
     graph.add_node("writer", writer_node)
     graph.add_node("editor", editor_node)
+    graph.add_node("visualizer", visualizer_node)
 
     graph.add_edge(START, "scout")
     graph.add_edge("scout", "curator")
     graph.add_edge("curator", "analyst")
     graph.add_edge("analyst", "writer")
     graph.add_edge("writer", "editor")
-    graph.add_edge("editor", END)
+    # Visuals are rendered after the editorial gate so we only pay to draw posts that
+    # can actually ship.
+    graph.add_edge("editor", "visualizer")
+    graph.add_edge("visualizer", END)
     return graph.compile()
 
 

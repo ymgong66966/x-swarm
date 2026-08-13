@@ -7,11 +7,22 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .agents import analyst, curator, editor, scout, writer
+from .agents import (
+    analyst,
+    curator,
+    editor,
+    measurer,
+    publisher,
+    scout,
+    strategist,
+    visualizer,
+    writer,
+)
+from .config import settings
 from .db import init_db, session_scope
 from .graph import run_pipeline
 from .llm import LLM
-from .models import Brief, Candidate, Draft, Item
+from .models import Asset, Brief, Candidate, Draft, Item, PostMetric, Publication
 
 app = typer.Typer(help="Agent swarm for an ML-frontier X account", no_args_is_help=True)
 console = Console()
@@ -86,7 +97,8 @@ def run_cmd(dry_run: bool = False, verbose: bool = False) -> None:
         f"candidates={len(state.get('candidate_ids', []))} "
         f"briefs={len(state.get('brief_ids', []))} "
         f"drafts={len(state.get('draft_ids', []))} "
-        f"ready={len(state.get('ready_ids', []))}"
+        f"ready={len(state.get('ready_ids', []))} "
+        f"visuals={len(state.get('asset_ids', []))}"
     )
     with session_scope() as session:
         _print_drafts([session.get(Draft, did) for did in state.get("draft_ids", [])])
@@ -119,6 +131,76 @@ def approve_cmd(draft_id: int, reject: bool = False, reason: str = "") -> None:
         if reason:
             draft.editor_notes = [*draft.editor_notes, f"human: {reason}"]
         console.print(f"draft {draft_id} -> [bold]{draft.status}[/bold]")
+
+
+@app.command("render")
+def render_cmd(draft_id: list[int] = typer.Option(None), dry_run: bool = False) -> None:
+    """Render (or re-render) the visual for specific drafts."""
+    init_db()
+    with session_scope() as session:
+        drafts = [session.get(Draft, did) for did in draft_id or []]
+        assets = visualizer.run(session, LLM(dry_run=dry_run), [d for d in drafts if d])
+        for asset in assets:
+            console.print(f"{asset.kind}: {asset.path}")
+
+
+@app.command("publish")
+def publish_cmd(
+    dry_run: bool = False,
+    schedule_only: bool = typer.Option(
+        True,
+        help="Queue the draft in Typefully without auto-publishing (phase-1 autonomy).",
+    ),
+    limit: int = typer.Option(None, help="Cap how many drafts are scheduled"),
+    verbose: bool = False,
+) -> None:
+    """Send approved drafts to Typefully at the next free posting slots."""
+    _setup_logging(verbose)
+    init_db()
+    if not settings.typefully_api_key and not dry_run:
+        console.print("[yellow]XSWARM_TYPEFULLY_API_KEY unset — dry run[/yellow]")
+    with session_scope() as session:
+        publications = publisher.run(
+            session, dry_run=dry_run, plan_only=schedule_only, limit=limit
+        )
+        table = Table("draft", "status", "scheduled_for", "provider id")
+        for publication in publications:
+            table.add_row(
+                str(publication.draft_id),
+                publication.status,
+                publication.scheduled_for.isoformat() if publication.scheduled_for else "",
+                publication.provider_draft_id or "",
+            )
+        console.print(table)
+
+
+@app.command("sync-metrics")
+def sync_metrics_cmd(days: int = typer.Option(None), verbose: bool = False) -> None:
+    """Pull X analytics for published posts from Typefully."""
+    _setup_logging(verbose)
+    init_db()
+    if not settings.typefully_api_key:
+        raise typer.BadParameter("XSWARM_TYPEFULLY_API_KEY is required to sync metrics")
+    with session_scope() as session:
+        stored = measurer.run(session, days=days)
+        console.print(f"[green]{stored} snapshots stored[/green]")
+
+
+@app.command("strategy")
+def strategy_cmd(
+    days: int = 28,
+    dry_run: bool = False,
+    write: bool = typer.Option(True, help="Rewrite playbook.md with the new strategy"),
+    verbose: bool = False,
+) -> None:
+    """Aggregate performance and rewrite the playbook the Writer follows."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        console.print(strategist.report(strategist.aggregate(session, days=days)))
+        console.print(
+            strategist.run(session, LLM(dry_run=dry_run), days=days, write_playbook=write)
+        )
 
 
 def _print_candidates(candidates: list[Candidate]) -> None:
@@ -154,7 +236,7 @@ def stats_cmd() -> None:
     """Row counts, for sanity-checking a run."""
     init_db()
     with session_scope() as session:
-        for model in (Item, Candidate, Brief, Draft):
+        for model in (Item, Candidate, Brief, Draft, Asset, Publication, PostMetric):
             console.print(f"{model.__tablename__}: {session.query(model).count()}")
 
 
