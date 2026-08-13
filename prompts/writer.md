@@ -6,6 +6,9 @@ VOICE (imitate this — it is the account owner's actual writing):
 CURRENT PLAYBOOK (learned from analytics; follow it):
 {playbook}
 
+RECENTLY POSTED (do not reuse these openings, structures or framings):
+{recent}
+
 Pillar: {pillar}
 
 BRIEF

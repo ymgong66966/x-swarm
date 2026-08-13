@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+from dataclasses import dataclass
 from typing import Any
+
+from anthropic.types import Usage as AnthropicUsage
+from openai.types import CompletionUsage as OpenAIUsage
 
 from .config import settings
 
+log = logging.getLogger(__name__)
 _JSON_BLOCK = re.compile(r"\{.*\}|\[.*\]", re.DOTALL)
+
+UsageLike = OpenAIUsage | AnthropicUsage | dict[str, int]
 
 
 class LLMUnavailable(RuntimeError):
@@ -14,6 +22,21 @@ class LLMUnavailable(RuntimeError):
 
 
 DEFAULT_SYSTEM = "You are a precise assistant. Answer exactly as instructed."
+
+
+@dataclass(frozen=True)
+class Usage:
+    agent: str
+    model: str
+    prompt_tokens: int
+    completion_tokens: int
+
+    @property
+    def cost_usd(self) -> float:
+        prompt_rate, completion_rate = settings.model_prices.get(self.model, (0.0, 0.0))
+        return (
+            self.prompt_tokens * prompt_rate + self.completion_tokens * completion_rate
+        ) / 1_000_000
 
 
 def resolve_provider() -> str | None:
@@ -41,6 +64,8 @@ class LLM:
         self.provider = resolve_provider()
         self.dry_run = dry_run or self.provider is None
         self._client = None
+        # Every billed call, in order. Drained into `model_calls` by `costs.record`.
+        self.usage: list[Usage] = []
 
     def _openai(self):
         if self._client is None:
@@ -63,29 +88,50 @@ class LLM:
         system: str = "",
         strong: bool = False,
         max_tokens: int = 2000,
+        agent: str = "unknown",
     ) -> str | None:
         if self.dry_run:
             return None
         system = system or DEFAULT_SYSTEM
         if self.provider == "openai":
+            model = settings.openai_strong_model if strong else settings.openai_fast_model
             completion = self._openai().chat.completions.create(
-                model=settings.openai_strong_model if strong else settings.openai_fast_model,
+                model=model,
                 max_tokens=max_tokens,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt},
                 ],
             )
+            self._track(agent, model, completion.usage)
             return completion.choices[0].message.content
         if self.provider == "anthropic":
+            model = settings.strong_model if strong else settings.fast_model
             message = self._anthropic().messages.create(
-                model=settings.strong_model if strong else settings.fast_model,
+                model=model,
                 max_tokens=max_tokens,
                 system=system,
                 messages=[{"role": "user", "content": prompt}],
             )
+            self._track(agent, model, message.usage)
             return "".join(block.text for block in message.content if block.type == "text")
         raise LLMUnavailable("no model provider configured")
+
+    def _track(self, agent: str, model: str, usage: UsageLike | None) -> None:
+        """The two SDKs name the same two numbers differently."""
+        if usage is None:
+            return
+        if isinstance(usage, dict):
+            prompt = usage.get("prompt_tokens", usage.get("input_tokens", 0))
+            completion = usage.get("completion_tokens", usage.get("output_tokens", 0))
+        elif isinstance(usage, OpenAIUsage):
+            prompt, completion = usage.prompt_tokens, usage.completion_tokens
+        elif isinstance(usage, AnthropicUsage):
+            prompt, completion = usage.input_tokens, usage.output_tokens
+        else:
+            log.warning("unrecognised usage payload from %s; not billing it", model)
+            return
+        self.usage.append(Usage(agent, model, int(prompt or 0), int(completion or 0)))
 
     def complete_json(self, prompt: str, **kwargs: Any) -> Any | None:
         raw = self.complete(prompt, **kwargs)

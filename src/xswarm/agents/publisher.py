@@ -66,10 +66,17 @@ def _queued_times(session: Session) -> list[dt.datetime]:
 
 
 def _thread(draft: Draft) -> list[str]:
-    posts = [draft.body]
+    posts = [draft.body, *(draft.thread or [])]
     if draft.link_reply:
         posts.append(draft.link_reply)
     return posts
+
+
+def _title(draft: Draft) -> str:
+    """Typefully's internal draft name. Roundups have no single source item."""
+    if draft.brief:
+        return draft.brief.candidate.item.title[:80]
+    return str((draft.features or {}).get("topic") or draft.body[:80])
 
 
 def publish(
@@ -97,7 +104,7 @@ def publish(
         media_ids=media_ids,
         publish_at=when,
         plan_only=plan_only,
-        title=draft.brief.candidate.item.title[:80],
+        title=_title(draft),
     )
     publication.provider_draft_id = str(response.get("draft_id") or response.get("id") or "")
     publication.status = "planned" if plan_only else "scheduled"

@@ -1,0 +1,65 @@
+[
+  {
+    "slug": "speculative-decoding",
+    "pillar": "paper_of_the_day",
+    "source": "arxiv",
+    "title": "Speculative decoding with a self-drafting head",
+    "url": "https://arxiv.org/abs/0000.00001",
+    "summary": "We attach a lightweight drafting head to the base model so a single forward pass proposes several tokens, which the base model then verifies in parallel. On a 70B model the method reaches 2.4x wall-clock speedup at batch size 1 with identical output distributions. Gains fall to 1.3x at batch size 32 because verification stops being the bottleneck.",
+    "whats_new": "A drafting head trained on the base model's own hidden states, so no second model has to be served.",
+    "what_it_replaces": "Two-model speculative decoding, which needs a separate draft model in memory.",
+    "key_number": "2.4x wall-clock speedup at batch size 1",
+    "caveat": "Gains fall to 1.3x at batch size 32, so this is a latency win, not a throughput win.",
+    "builder_takeaway": "Worth it if you serve interactive single-stream traffic; skip it if you batch aggressively.",
+    "grounded_claims": [
+      "The drafting head is trained on the base model's hidden states.",
+      "Output distributions are identical to the base model.",
+      "2.4x wall-clock speedup at batch size 1 on a 70B model.",
+      "1.3x speedup at batch size 32."
+    ],
+    "unverified_claims": ["It will make every inference stack faster."],
+    "visual_hint": "result_chart"
+  },
+  {
+    "slug": "agent-memory-benchmark",
+    "pillar": "paper_of_the_day",
+    "source": "semantic_scholar",
+    "title": "A benchmark for long-horizon agent memory",
+    "url": "https://arxiv.org/abs/0000.00002",
+    "summary": "The benchmark runs agents over 200-turn sessions and measures whether facts stated early are still used correctly late. Retrieval-augmented memory scores 61% while a full-context baseline scores 74%, but the full-context baseline costs 9x more per session. Every method degrades sharply after turn 120.",
+    "whats_new": "A benchmark that measures memory over 200-turn sessions rather than single retrieval hops.",
+    "what_it_replaces": "Single-hop retrieval benchmarks that never test whether an agent keeps a fact.",
+    "key_number": "Retrieval memory 61% vs full-context 74%",
+    "caveat": "Every method degrades sharply after turn 120, so no approach is solved.",
+    "builder_takeaway": "If your sessions are short, retrieval memory is fine; the gap only opens up late.",
+    "grounded_claims": [
+      "Sessions run 200 turns.",
+      "Retrieval-augmented memory scores 61%.",
+      "Full-context baseline scores 74% at 9x the cost per session.",
+      "All methods degrade after turn 120."
+    ],
+    "unverified_claims": ["Retrieval memory is obsolete."],
+    "visual_hint": "comparison_table"
+  },
+  {
+    "slug": "quantization-regression",
+    "pillar": "systems_take",
+    "source": "github_trending",
+    "title": "4-bit quantization regressions on reasoning tasks",
+    "url": "https://github.com/example/quant-eval",
+    "summary": "The repository evaluates 4-bit weight-only quantization across eight models. Perplexity moves less than 1%, but chain-of-thought accuracy drops 6 points on average, concentrated in multi-step arithmetic. Activation-aware methods recover about half of the loss.",
+    "whats_new": "Perplexity-neutral quantization still costs 6 points of chain-of-thought accuracy.",
+    "what_it_replaces": "Perplexity as the default acceptance test for a quantized model.",
+    "key_number": "6-point drop in chain-of-thought accuracy",
+    "caveat": "Activation-aware methods recover about half the loss, so the gap is narrowable.",
+    "builder_takeaway": "Stop shipping a quantized model on a perplexity check; run your reasoning evals.",
+    "grounded_claims": [
+      "Eight models were evaluated with 4-bit weight-only quantization.",
+      "Perplexity moves less than 1%.",
+      "Chain-of-thought accuracy drops 6 points on average.",
+      "Activation-aware methods recover about half of the loss."
+    ],
+    "unverified_claims": ["4-bit quantization is unusable in production."],
+    "visual_hint": "number_card"
+  }
+]

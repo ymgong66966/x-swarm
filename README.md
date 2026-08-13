@@ -40,13 +40,16 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm scout` | Ingest from all sources (`--source arxiv` to limit) |
 | `xswarm curate` | Score items, shortlist today's candidates |
 | `xswarm draft` | Brief → variants → editor gate |
-| `xswarm run` | All of the above via the LangGraph pipeline, plus visuals |
+| `xswarm run` | All of the above via the LangGraph pipeline, plus threads and visuals |
+| `xswarm roundup` | Compose the weekly curation thread from the last 7 days of candidates |
 | `xswarm review` / `approve` | Human-in-the-loop queue |
 | `xswarm render --draft-id 7` | Re-render one draft's visual |
 | `xswarm publish` | Queue approved drafts in Typefully at the next free slots |
 | `xswarm sync-metrics` | Pull X analytics for published posts |
 | `xswarm strategy` | Aggregate performance and rewrite `playbook.md` |
 | `xswarm stats` | Row counts |
+| `xswarm cost` | Model spend per agent, month to date, projected against the budget |
+| `xswarm eval` | Score draft quality offline against frozen briefs |
 
 ## Sources
 
@@ -114,6 +117,41 @@ visual template, and posting hour, then has the model rewrite `playbook.md` — 
 changes per week, and only where a dimension has ≥3 posts behind it. Each run also archives the
 raw aggregate to `strategy/<date>.md`. In CI the rewrite opens a PR instead of committing to
 main, because that file steers every future post.
+
+## Threads, memory and cost
+
+Drafts on the `paper_of_the_day` and `explainer` pillars whose brief carries at least four
+grounded claims are expanded into threads by the Composer; the Editor then checks every post
+separately, and the link reply is still appended last. `xswarm roundup` builds the weekly
+curation thread from the week's top candidates — it has no single brief, so it carries its own
+grounding in `features` for the Editor to check numbers against.
+
+The Curator skips anything the account already covered in the last `XSWARM_NOVELTY_DAYS`
+days — measured against drafts that were actually approved, scheduled or published, not merely
+considered — and the Writer is shown recent openings so it stops reaching for the same one.
+
+Every model call is billed to an agent in `model_calls`, so `xswarm cost` answers which stage
+is eating the budget. Prices live in `XSWARM_MODEL_PRICES` (USD per million tokens); an unknown
+model costs $0 rather than a guess.
+
+## Migrations
+
+```bash
+.venv/bin/alembic upgrade head     # uses XSWARM_DATABASE_URL
+.venv/bin/alembic revision --autogenerate -m "..."
+```
+
+`xswarm init` still calls `create_all` for throwaway local databases, but Postgres should be
+migrated. A SQLite database created before Alembic existed has no version row and is missing
+the thread columns — recreate it rather than upgrading it.
+
+## Evaluation
+
+`xswarm eval` runs the Writer, Composer and Editor over frozen briefs in
+`src/xswarm/evals/fixtures.json` and scores hook quality, conciseness, specificity, caveat
+coverage, variant diversity and the Editor pass rate. `--json-out` writes the report for diffing
+and `--min-score` fails the command, so a playbook or prompt change can be checked before it
+ships. Dry-run mode scores the deterministic fallbacks; with a key it scores the real thing.
 
 ## Design notes
 

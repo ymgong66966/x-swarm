@@ -4,6 +4,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from .. import memory
 from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import Brief, Draft
@@ -34,11 +35,12 @@ def _fallback_body(brief: Brief, hook_style: str) -> str:
     return body[: settings.max_post_chars]
 
 
-def write(brief: Brief, llm: LLM, voice: str, playbook: str) -> list[Draft]:
+def write(brief: Brief, llm: LLM, voice: str, playbook: str, recent: str = "") -> list[Draft]:
     payload = llm.complete_json(
         load_prompt("writer").format(
             voice=voice,
             playbook=playbook,
+            recent=recent or "(nothing posted yet)",
             pillar=brief.candidate.pillar,
             max_chars=settings.max_post_chars,
             variants=settings.drafts_per_brief,
@@ -51,6 +53,7 @@ def write(brief: Brief, llm: LLM, voice: str, playbook: str) -> list[Draft]:
         ),
         strong=True,
         max_tokens=2000,
+        agent="writer",
     )
 
     drafts: list[Draft] = []
@@ -95,9 +98,10 @@ def write(brief: Brief, llm: LLM, voice: str, playbook: str) -> list[Draft]:
 def run(session: Session, llm: LLM, briefs: list[Brief]) -> list[Draft]:
     voice = _read(settings.voice_path)
     playbook = _read(settings.playbook_path)
+    recent = memory.writer_context(session)
     drafts: list[Draft] = []
     for brief in briefs:
-        for draft in write(brief, llm, voice, playbook):
+        for draft in write(brief, llm, voice, playbook, recent):
             session.add(draft)
             drafts.append(draft)
     session.flush()
