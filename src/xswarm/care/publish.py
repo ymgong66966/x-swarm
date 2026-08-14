@@ -240,9 +240,15 @@ def pull_edits(article: Article, repo_dir: Path | None = None) -> list[str]:
             f"article {article.id} has no publish branch; run `xswarm care publish {article.id}`"
         )
     repo = ensure_checkout(repo_dir)
-    _git(repo, "fetch", "origin", article.site_branch)
     path = f"{settings.site_content_dir}/{article.run_date.isoformat()}-{article.slug}.md"
-    return apply_edits(article, _git(repo, "show", f"origin/{article.site_branch}:{path}"))
+    try:
+        _git(repo, "fetch", "origin", article.site_branch)
+        ref = f"origin/{article.site_branch}"
+    except PublishError:
+        # GitHub deletes the head branch on merge, and after that the merged file on the
+        # default branch is the version that shipped.
+        ref = f"origin/{settings.site_default_branch}"
+    return apply_edits(article, _git(repo, "show", f"{ref}:{path}"))
 
 
 # ---------------------------------------------------------------------------- git side

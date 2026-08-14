@@ -64,6 +64,7 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm care sync-edits 12` | Read edits you made in that PR back into the article |
 | `xswarm care status` | Every article's state: PR, live URL, promo posts |
 | `xswarm care promote 12` | Only once the article URL returns 200: release its promo drafts |
+| `xswarm care watch` | Unattended sync-edits + promote for every article waiting on a site PR |
 | `xswarm crawl` | Robots, sitemap, indexability, title/meta/canonical per URL |
 | `xswarm sync-traffic` | Pull article traffic from Plausible |
 | `xswarm dashboard` | Both streams side by side, written to `dashboard.html` |
@@ -95,6 +96,16 @@ when `XSWARM_GITHUB_TOKEN` is set (otherwise it prints the compare URL for you t
 
 `care sync-edits` reads the file back off the PR branch so the promo posts quote your final
 wording rather than the model's first draft.
+
+`care watch` is the same two steps for every pending article at once, with nothing to type per
+article: it syncs each one's edits (from the PR branch, or from `main` once the branch is
+deleted by the merge) and promotes the ones that are already live. The `care-watch` workflow
+(`ci/workflows/care-watch.yml`, to be moved into `.github/workflows/` by hand — my token cannot
+write workflow files) runs it hourly and on a `repository_dispatch: article-merged` that alverna-site sends when a
+merge to its `main` touches `content/resources/**`, so after you merge the PR the rest of the
+loop happens without anyone at a terminal. It needs `XSWARM_DATABASE_URL` to point at the same
+(Postgres) database the runs write to — the state cannot live in a local SQLite file if a
+runner is meant to advance it.
 
 `care promote` needs more than a 200: the site is a single-page app whose host answers 200
 with the same shell for every unknown path, so the page must also mention the article's own
