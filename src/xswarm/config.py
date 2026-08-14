@@ -141,7 +141,21 @@ class Settings(BaseSettings):
     care_site_url: str = "https://alvernahealth.com"
     care_site_paths: list[str] = Field(default=["/", "/providers", "/become-a-trainer"])
     # Where articles are published, used for internal links, promo links and SEO checks.
-    care_blog_base_url: str = "https://alvernahealth.com/blog"
+    care_blog_base_url: str = "https://alvernahealth.com/resources"
+
+    # Publishing to the company site: an approved article becomes a pull request there,
+    # and a human merging that PR is what puts it live.
+    site_repo: str = "alverna-health/alverna-site"
+    site_repo_url: str = "https://github.com/alverna-health/alverna-site.git"
+    site_repo_dir: Path = REPO_ROOT.parent / "alverna-site"
+    site_default_branch: str = "main"
+    site_content_dir: str = "content/resources"
+    site_media_dir: str = "public/resources/media"
+    site_branch_prefix: str = "article"
+    # Only needed to open the PR through the API; without it the branch is still pushed
+    # and the compare URL is printed for a human to click.
+    github_token: str | None = None
+    github_api_url: str = "https://api.github.com"
     care_articles_dir: Path = REPO_ROOT / "content" / "articles"
     care_articles_per_run: int = 2
     care_candidates_per_run: int = 6

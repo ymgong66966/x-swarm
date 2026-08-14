@@ -25,6 +25,7 @@ from .agents import (
 )
 from .analytics import crawl, dashboard, traffic
 from .care import export as care_export
+from .care import publish as care_publish
 from .care import site as care_site
 from .care.graph import run_pipeline as run_care_pipeline
 from .config import settings
@@ -513,6 +514,166 @@ def care_export_cmd(article_id: list[int] = typer.Option(None)) -> None:
             articles = list(session.query(Article).filter(Article.status == "ready_for_review"))
         for path in care_export.run([a for a in articles if a is not None]):
             console.print(str(path))
+
+
+@care_app.command("approve")
+def care_approve_cmd(article_id: int, reject: bool = False, reason: str = "") -> None:
+    """Clear an article for publication (or reject it). Publishing requires this."""
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        if not reject and article.status not in {care_publish.STATUS_READY, "approved"}:
+            raise typer.BadParameter(
+                f"article {article_id} is '{article.status}'; only articles that cleared "
+                "the compliance editor can be approved"
+            )
+        article.status = "rejected" if reject else care_publish.STATUS_APPROVED
+        if reason:
+            article.editor_notes = [*article.editor_notes, f"human: {reason}"]
+        console.print(f"article {article_id} -> [bold]{article.status}[/bold]")
+
+
+@care_app.command("publish")
+def care_publish_cmd(
+    article_id: int,
+    hero: str = typer.Option("", help="Image file to ship as the article's hero"),
+    hero_alt: str = typer.Option("", help="Alt text for the hero image"),
+    dry_run: bool = typer.Option(False, help="Render the file and stop; touch no git"),
+    ready: bool = typer.Option(
+        False, help="Open the PR ready for review instead of as a draft you still edit"
+    ),
+    verbose: bool = False,
+) -> None:
+    """Open a pull request on the site repo for an approved article. Merging publishes it."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        try:
+            result = care_publish.publish(
+                article,
+                hero_path=Path(hero) if hero else None,
+                hero_alt=hero_alt,
+                dry_run=dry_run,
+                draft=not ready,
+            )
+        except care_publish.PublishError as error:
+            console.print(f"[red]{error}[/red]")
+            raise typer.Exit(1) from None
+
+        if dry_run:
+            console.print(f"[yellow]dry run[/yellow] {result.content_path}")
+            console.print(result.markdown[:1200])
+            return
+        article.site_pr_url = result.pr_url or result.compare_url
+        article.site_branch = result.branch
+        console.print(f"branch [bold]{result.branch}[/bold] -> {result.content_path}")
+        console.print(result.pr_url or f"open the PR: {result.compare_url}")
+        console.print(
+            f"edit the markdown in the PR (press `.` on it), then "
+            f"`xswarm care sync-edits {article_id}`"
+        )
+        console.print(f"lands at {result.article_url} once merged")
+
+
+@care_app.command("sync-edits")
+def care_sync_edits_cmd(article_id: int, verbose: bool = False) -> None:
+    """Pull edits made in the site pull request back into the article."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        try:
+            changed = care_publish.pull_edits(article)
+        except care_publish.PublishError as error:
+            console.print(f"[red]{error}[/red]")
+            raise typer.Exit(1) from None
+        if not changed:
+            console.print(f"article {article_id} already matches the pull request")
+            return
+        console.print(f"updated {', '.join(changed)} from {article.site_branch}")
+        console.print(
+            "[yellow]the promo posts still quote the pre-edit text[/yellow] — review them "
+            f"(`xswarm review`) before `xswarm care promote {article_id}`"
+        )
+
+
+@care_app.command("status")
+def care_status_cmd(check: bool = typer.Option(False, help="Also fetch each article URL")) -> None:
+    """Where every article sits between draft and promoted."""
+    init_db()
+    table = Table(title="care articles")
+    for column in ("id", "slug", "status", "site PR", "live", "promos"):
+        table.add_column(column)
+    with session_scope() as session:
+        articles = session.query(Article).order_by(Article.id.desc()).limit(30).all()
+        for article in articles:
+            live = ""
+            if check and article.site_branch:
+                ok, code = care_publish.is_live(
+                    care_publish.article_url(article),
+                    marker=care_publish.article_marker(article),
+                )
+                live = "200" if ok else ("200, wrong page" if code == 200 else str(code) or "")
+                live = live or "no response"
+            approved = sum(1 for draft in article.promos if draft.status == "approved")
+            table.add_row(
+                str(article.id),
+                article.slug,
+                article.status,
+                article.site_pr_url or "",
+                live,
+                f"{approved}/{len(article.promos)} approved",
+            )
+    console.print(table)
+
+
+@care_app.command("promote")
+def care_promote_cmd(
+    article_id: int,
+    force: bool = typer.Option(
+        False, help="Accept a bare 200 — use only if you have opened the URL yourself"
+    ),
+    verbose: bool = False,
+) -> None:
+    """Release an article's promo posts — only once its URL actually resolves."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        url = care_publish.article_url(article)
+        marker = "" if force else care_publish.article_marker(article)
+        live, status = care_publish.is_live(url, marker=marker)
+        if not live:
+            reason = (
+                "answered 200 with the site's fallback shell, not the article"
+                if status == 200
+                else f"returned {status or 'no response'}"
+            )
+            console.print(
+                f"[red]{url} {reason}[/red] — merge the site PR first and give the deploy a "
+                "minute; promos must never link to a page that is not there"
+            )
+            if status == 200:
+                console.print(
+                    "if the page does look right in a browser, the host is not serving the "
+                    f"prerendered head tags — `xswarm care promote {article_id} --force`"
+                )
+            raise typer.Exit(1)
+        article.published_url = url
+        article.status = "published"
+        promos = [d for d in article.promos if d.status == "ready_for_review"]
+        for draft in promos:
+            draft.status = "approved"
+        console.print(f"{url} is live; approved {len(promos)} promo posts for scheduling")
 
 
 @app.command("crawl")

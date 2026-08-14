@@ -59,9 +59,47 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm care run` | Care stream end to end: research → curate → plan → article → compliance → promos |
 | `xswarm care sync-site` | Re-read alvernahealth.com into the product-fact table |
 | `xswarm care articles` / `care export` | List articles / write them to `content/articles/*.md` |
+| `xswarm care approve 12` | Human gate: mark a reviewed article approved (or `--reject --reason ...`) |
+| `xswarm care publish 12 --hero art.png` | Branch + draft PR the approved article into the Alverna site repo |
+| `xswarm care sync-edits 12` | Read edits you made in that PR back into the article |
+| `xswarm care status` | Every article's state: PR, live URL, promo posts |
+| `xswarm care promote 12` | Only once the article URL returns 200: release its promo drafts |
 | `xswarm crawl` | Robots, sitemap, indexability, title/meta/canonical per URL |
 | `xswarm sync-traffic` | Pull article traffic from Plausible |
 | `xswarm dashboard` | Both streams side by side, written to `dashboard.html` |
+
+## Publishing an article
+
+The site repo is the publication gate — nothing goes live without a human merge.
+
+```
+care run ─► review ─► care approve ─► care publish ─► draft PR on alverna-site
+                                                          │
+                                    you edit the markdown in the PR (press `.` on it)
+                                                          │
+                                              care sync-edits ─► your wording lands in the DB
+                                                          │
+                            "Ready for review" ─► you merge ─► /resources/<slug> live
+                                                          │
+                                     care promote ─► URL must return 200 ─► promos approved
+                                                          │
+                                                    xswarm publish ─► Typefully schedules them
+```
+
+The PR is the editing surface, so there is no second CMS to log into and the text you edit is
+the text that ships. `care publish` refuses anything that is not `approved`, renders the
+article in the site's front-matter dialect into `content/resources/<date>-<slug>.md`, copies
+`--hero` to `public/resources/media/<slug>.<ext>`, pushes a branch, and opens a **draft** PR
+when `XSWARM_GITHUB_TOKEN` is set (otherwise it prints the compare URL for you to open).
+`--ready` skips the draft state and `--dry-run` renders the file and touches no git.
+
+`care sync-edits` reads the file back off the PR branch so the promo posts quote your final
+wording rather than the model's first draft.
+
+`care promote` needs more than a 200: the site is a single-page app whose host answers 200
+with the same shell for every unknown path, so the page must also mention the article's own
+path before the promos are released. If a page you can see in a browser is still refused, the
+host is not serving the prerendered head tags — `care promote <id> --force` overrides.
 
 ## Care stream
 
