@@ -169,6 +169,88 @@ def test_publish_commits_on_a_branch_and_pushes(
     assert main_files == ["README.md"]
 
 
+def test_pull_edits_reads_the_reviewers_version_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A human edits the file in the PR; our row must follow, or the promos quote stale text."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)], check=True)
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "clone", str(origin), str(seed)], check=True)
+    (seed / "README.md").write_text("site\n")
+    for args in (
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "test"],
+        ["add", "README.md"],
+        ["commit", "-m", "init"],
+        ["push", "-u", "origin", "main"],
+    ):
+        subprocess.run(["git", *args], cwd=seed, check=True)
+
+    monkeypatch.setattr(settings, "site_repo_url", str(origin))
+    monkeypatch.setattr(settings, "github_token", None)
+    article = make_article()
+    result = publish.publish(article, repo_dir=tmp_path / "site")
+    article.site_branch = result.branch
+
+    # Stand in for the reviewer editing the file in GitHub's web editor.
+    subprocess.run(["git", "fetch", "origin", result.branch], cwd=seed, check=True)
+    subprocess.run(["git", "checkout", result.branch], cwd=seed, check=True)
+    edited = (seed / result.content_path).read_text()
+    edited = edited.replace(
+        '"Caregiver training you are allowed to bill for"', '"Bill for caregiver training"'
+    ).replace("CMS finalised codes 97550-97552.", "CMS finalized codes 97550-97552 in CY2025.")
+    (seed / result.content_path).write_text(edited)
+    subprocess.run(["git", "commit", "-am", "edit"], cwd=seed, check=True)
+    subprocess.run(["git", "push"], cwd=seed, check=True)
+
+    changed = publish.pull_edits(article, repo_dir=tmp_path / "site")
+
+    assert set(changed) >= {"title", "body_md"}
+    assert article.title == "Bill for caregiver training"
+    assert "finalized codes 97550-97552 in CY2025" in article.body_md
+    # The FAQ the site owns comes back into the body, so nothing the reviewer sees is lost.
+    assert "Can this be furnished over telehealth?" in article.body_md
+
+
+def test_pull_edits_without_a_publish_branch_is_refused() -> None:
+    with pytest.raises(publish.PublishError, match="no publish branch"):
+        publish.pull_edits(make_article(site_branch=None))
+
+
+def test_apply_edits_is_idempotent_so_syncing_twice_reports_no_change() -> None:
+    """The first sync normalises our body to the file's shape; a second must be a no-op."""
+    article = make_article()
+    publish.apply_edits(article, publish.render(article))
+    assert publish.apply_edits(article, publish.render(article)) == []
+
+
+def test_edited_frontmatter_that_is_not_json_fails_loudly() -> None:
+    broken = "---\ntitle: Bill for caregiver training\n---\n\nBody.\n"
+    with pytest.raises(publish.PublishError, match="is not JSON"):
+        publish.apply_edits(make_article(), broken)
+
+
+def test_pull_requests_open_as_drafts_so_the_reviewer_can_edit_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: dict[str, object] = {}
+
+    def fake_post(url: str, **kwargs) -> httpx.Response:
+        sent.update(kwargs["json"])
+        return httpx.Response(201, json={"html_url": "https://github.com/x/y/pull/9"})
+
+    monkeypatch.setattr(settings, "github_token", "t")
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    assert publish.open_pull_request("article/x", "Publish: x", "body") == (
+        "https://github.com/x/y/pull/9"
+    )
+    assert sent["draft"] is True
+    publish.open_pull_request("article/x", "Publish: x", "body", draft=False)
+    assert sent["draft"] is False
+
+
 def test_is_live_only_accepts_200() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404 if "missing" in request.url.path else 200, text="ok")

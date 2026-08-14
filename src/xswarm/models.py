@@ -243,6 +243,8 @@ class Article(Base):
     published_url: Mapped[str | None] = mapped_column(Text)
     # The pull request on the site repo. Set when we open it, before anything is live.
     site_pr_url: Mapped[str | None] = mapped_column(Text)
+    # Its branch, so edits made in the PR can be read back into this row.
+    site_branch: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     promos: Mapped[list[Draft]] = relationship(back_populates="article")

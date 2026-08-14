@@ -136,6 +136,90 @@ def is_live(url: str, client: httpx.Client | None = None) -> tuple[bool, int]:
     return status == 200, status
 
 
+def parse_frontmatter(markdown: str) -> tuple[dict[str, object], str]:
+    """Inverse of `frontmatter()` — reads a file a human may have edited by hand."""
+    text = markdown.lstrip("\ufeff").lstrip()
+    if not text.startswith("---"):
+        raise PublishError("edited article has no --- front matter block")
+    _, _, rest = text.partition("---")
+    block, sep, body = rest.partition("\n---")
+    if not sep:
+        raise PublishError("edited article's front matter block is never closed")
+
+    data: dict[str, object] = {}
+    for line in block.splitlines():
+        if not line.strip():
+            continue
+        key, separator, value = line.partition(":")
+        if not separator:
+            raise PublishError(f'front matter line is not "key: value": {line}')
+        try:
+            data[key.strip()] = json.loads(value.strip())
+        except json.JSONDecodeError as error:
+            raise PublishError(
+                f"front matter value for {key.strip()!r} is not JSON: {error}"
+            ) from error
+    return data, body.lstrip("\n").strip()
+
+
+def _as_str(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _as_dicts(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def apply_edits(article: Article, markdown: str) -> list[str]:
+    """Copy a reviewer's edits back onto the article. Returns the fields that changed.
+
+    The file in the pull request is the version that ships, so once a human has touched
+    it our row is stale — and the promo posts are written from our row.
+    """
+    data, body = parse_frontmatter(markdown)
+    faq = _as_dicts(data.get("faq"))
+    if faq:
+        rendered = "\n\n".join(f"**{item.get('q', '')}**\n\n{item.get('a', '')}" for item in faq)
+        body = f"{body}\n\n{FAQ_HEADING}\n\n{rendered}"
+
+    title = _as_str(data.get("title")) or article.title
+    description = _as_str(data.get("description")) or article.meta_description
+    dek = _as_str(data.get("dek"))
+    words = len(body.split())
+
+    changes: list[str] = []
+    if article.title != title:
+        article.title = title
+        changes.append("title")
+    if article.meta_description != description:
+        article.meta_description = description
+        changes.append("meta_description")
+    if article.dek != dek:
+        article.dek = dek
+        changes.append("dek")
+    if article.body_md != body:
+        article.body_md = body
+        changes.append("body_md")
+    if article.word_count != words:
+        article.word_count = words
+        changes.append("word_count")
+    return changes
+
+
+def pull_edits(article: Article, repo_dir: Path | None = None) -> list[str]:
+    """Read the article file back off its pull-request branch and apply any edits."""
+    if not article.site_branch:
+        raise PublishError(
+            f"article {article.id} has no publish branch; run `xswarm care publish {article.id}`"
+        )
+    repo = ensure_checkout(repo_dir)
+    _git(repo, "fetch", "origin", article.site_branch)
+    path = f"{settings.site_content_dir}/{article.run_date.isoformat()}-{article.slug}.md"
+    return apply_edits(article, _git(repo, "show", f"origin/{article.site_branch}:{path}"))
+
+
 # ---------------------------------------------------------------------------- git side
 
 
@@ -194,8 +278,12 @@ def _hero_target(hero_path: Path, slug: str) -> str:
     return f"{settings.site_media_dir}/{slug}{suffix}"
 
 
-def open_pull_request(branch: str, title: str, body: str) -> str:
-    """Open the PR through the API when a token is configured; otherwise return ""."""
+def open_pull_request(branch: str, title: str, body: str, *, draft: bool = True) -> str:
+    """Open the PR through the API when a token is configured; otherwise return "".
+
+    Draft by default: the PR is where the reviewer edits the article, and "Ready for
+    review" is a clearer "I'm done editing" signal than remembering not to merge early.
+    """
     if not settings.github_token:
         return ""
     response = httpx.post(
@@ -209,6 +297,7 @@ def open_pull_request(branch: str, title: str, body: str) -> str:
             "head": branch,
             "base": settings.site_default_branch,
             "body": body,
+            "draft": draft,
         },
         timeout=30.0,
     )
@@ -231,7 +320,11 @@ def _pr_body(article: Article, url: str) -> str:
         f"**Thesis.** {article.thesis}\n\n"
         f"Lands at `{url}` once merged.\n\n"
         f"### Sources\n{sources or '- (none recorded)'}\n\n"
-        f"Review the claims before merging; merging is what publishes it."
+        f"### How to edit this\n"
+        f"Press `.` on this PR (or use the pencil icon on the file) to edit the markdown in\n"
+        f"place, commit to this branch, then run `xswarm care sync-edits {article.id}` so the\n"
+        f"promo posts quote your wording. Mark the PR ready and merge when it reads right —\n"
+        f"merging is what publishes it."
     )
 
 
@@ -241,6 +334,7 @@ def publish(
     hero_path: Path | None = None,
     hero_alt: str = "",
     dry_run: bool = False,
+    draft: bool = True,
     repo_dir: Path | None = None,
 ) -> PublishResult:
     """Approved article -> branch + PR on the site repo. Never touches `main`."""
@@ -290,6 +384,8 @@ def publish(
     _git(repo, "checkout", settings.site_default_branch)
 
     result.compare_url = f"https://github.com/{settings.site_repo}/pull/new/{branch}"
-    result.pr_url = open_pull_request(branch, f"Publish: {article.title}", _pr_body(article, url))
+    result.pr_url = open_pull_request(
+        branch, f"Publish: {article.title}", _pr_body(article, url), draft=draft
+    )
     log.info("pushed %s (%s)", branch, result.pr_url or result.compare_url)
     return result

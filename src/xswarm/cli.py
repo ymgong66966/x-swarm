@@ -207,9 +207,7 @@ def publish_cmd(
     if not settings.typefully_api_key and not dry_run:
         console.print("[yellow]XSWARM_TYPEFULLY_API_KEY unset — dry run[/yellow]")
     with session_scope() as session:
-        publications = publisher.run(
-            session, dry_run=dry_run, plan_only=schedule_only, limit=limit
-        )
+        publications = publisher.run(session, dry_run=dry_run, plan_only=schedule_only, limit=limit)
         table = Table("draft", "status", "scheduled_for", "provider id")
         for publication in publications:
             table.add_row(
@@ -443,6 +441,9 @@ def care_publish_cmd(
     hero: str = typer.Option("", help="Image file to ship as the article's hero"),
     hero_alt: str = typer.Option("", help="Alt text for the hero image"),
     dry_run: bool = typer.Option(False, help="Render the file and stop; touch no git"),
+    ready: bool = typer.Option(
+        False, help="Open the PR ready for review instead of as a draft you still edit"
+    ),
     verbose: bool = False,
 ) -> None:
     """Open a pull request on the site repo for an approved article. Merging publishes it."""
@@ -458,6 +459,7 @@ def care_publish_cmd(
                 hero_path=Path(hero) if hero else None,
                 hero_alt=hero_alt,
                 dry_run=dry_run,
+                draft=not ready,
             )
         except care_publish.PublishError as error:
             console.print(f"[red]{error}[/red]")
@@ -468,9 +470,64 @@ def care_publish_cmd(
             console.print(result.markdown[:1200])
             return
         article.site_pr_url = result.pr_url or result.compare_url
+        article.site_branch = result.branch
         console.print(f"branch [bold]{result.branch}[/bold] -> {result.content_path}")
         console.print(result.pr_url or f"open the PR: {result.compare_url}")
+        console.print(
+            f"edit the markdown in the PR (press `.` on it), then "
+            f"`xswarm care sync-edits {article_id}`"
+        )
         console.print(f"lands at {result.article_url} once merged")
+
+
+@care_app.command("sync-edits")
+def care_sync_edits_cmd(article_id: int, verbose: bool = False) -> None:
+    """Pull edits made in the site pull request back into the article."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        try:
+            changed = care_publish.pull_edits(article)
+        except care_publish.PublishError as error:
+            console.print(f"[red]{error}[/red]")
+            raise typer.Exit(1) from None
+        if not changed:
+            console.print(f"article {article_id} already matches the pull request")
+            return
+        console.print(f"updated {', '.join(changed)} from {article.site_branch}")
+        console.print(
+            "[yellow]the promo posts still quote the pre-edit text[/yellow] — review them "
+            f"(`xswarm review`) before `xswarm care promote {article_id}`"
+        )
+
+
+@care_app.command("status")
+def care_status_cmd(check: bool = typer.Option(False, help="Also fetch each article URL")) -> None:
+    """Where every article sits between draft and promoted."""
+    init_db()
+    table = Table(title="care articles")
+    for column in ("id", "slug", "status", "site PR", "live", "promos"):
+        table.add_column(column)
+    with session_scope() as session:
+        articles = session.query(Article).order_by(Article.id.desc()).limit(30).all()
+        for article in articles:
+            live = ""
+            if check and article.site_branch:
+                ok, code = care_publish.is_live(care_publish.article_url(article))
+                live = "200" if ok else str(code or "no response")
+            approved = sum(1 for draft in article.promos if draft.status == "approved")
+            table.add_row(
+                str(article.id),
+                article.slug,
+                article.status,
+                article.site_pr_url or "",
+                live,
+                f"{approved}/{len(article.promos)} approved",
+            )
+    console.print(table)
 
 
 @care_app.command("promote")
