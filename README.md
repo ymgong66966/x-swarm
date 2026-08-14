@@ -138,7 +138,9 @@ rather than shipping a bare post.
 `render` (never generate), `generate` (always try). The house look lives in
 `prompts/art_direction.md` — dark `#0d1117`, one blue and one orange accent, flat editorial
 illustration, no faces or chrome — and every prompt ends with a hard *no text, no numbers, no
-labels, no logos* constraint, because generated type is the fastest way to look fake.
+labels, no logos* constraint, because generated type is the fastest way to look fake. Image
+models honour that maybe two times in three, so every generated image is read back by the
+fast model; one with words in it is retried once and then abandoned for a rendered card.
 
 | Style | Used for |
 |---|---|
