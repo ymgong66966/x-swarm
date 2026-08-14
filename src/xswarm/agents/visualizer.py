@@ -10,6 +10,7 @@ from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import Asset, Brief, Draft
 from ..render import TEMPLATES, VisualSpec, alt_text, render
+from .illustrator import illustrate
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +91,28 @@ def visualize(session: Session, draft: Draft, llm: LLM) -> Asset:
     return asset
 
 
+def has_plottable_data(brief: Brief) -> bool:
+    """A chart is only honest when the brief actually carries a measured figure."""
+    if brief.visual_hint in ("result_chart", "comparison_table"):
+        return True
+    return bool(brief.key_number and NUMBER_RE.search(brief.key_number))
+
+
+def attach_visual(session: Session, draft: Draft, llm: LLM) -> Asset:
+    """One image per draft, chosen by `visual_mode`. Generated art is attempted first
+    only where there is no data to plot, and a failed generation still falls back to a
+    rendered card so the draft is never left without a visual."""
+    brief = draft.brief
+    generated = settings.visual_mode == "generate" or (
+        settings.visual_mode == "auto" and brief is not None and not has_plottable_data(brief)
+    )
+    if generated:
+        asset = illustrate(session, draft, llm)
+        if asset is not None:
+            return asset
+    return visualize(session, draft, llm)
+
+
 def _one_per_brief(drafts: list[Draft]) -> list[Draft]:
     """Only one variant per brief ever ships, so only one needs a rendered visual."""
     chosen: dict[int, Draft] = {}
@@ -101,7 +124,7 @@ def _one_per_brief(drafts: list[Draft]) -> list[Draft]:
 def run(session: Session, llm: LLM, drafts: list[Draft]) -> list[Asset]:
     # Roundup threads have no single brief to draw from; they ship text-only.
     with_brief = [d for d in drafts if d.brief is not None]
-    assets = [visualize(session, draft, llm) for draft in _one_per_brief(with_brief)]
+    assets = [attach_visual(session, draft, llm) for draft in _one_per_brief(with_brief)]
     session.flush()
-    log.info("rendered %d visuals", len(assets))
+    log.info("attached %d visuals", len(assets))
     return assets

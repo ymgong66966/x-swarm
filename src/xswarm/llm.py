@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -30,13 +31,15 @@ class Usage:
     model: str
     prompt_tokens: int
     completion_tokens: int
+    images: int = 0
 
     @property
     def cost_usd(self) -> float:
         prompt_rate, completion_rate = settings.model_prices.get(self.model, (0.0, 0.0))
-        return (
+        tokens = (
             self.prompt_tokens * prompt_rate + self.completion_tokens * completion_rate
         ) / 1_000_000
+        return tokens + self.images * settings.image_prices.get(self.model, 0.0)
 
 
 def resolve_provider() -> str | None:
@@ -132,6 +135,29 @@ class LLM:
             log.warning("unrecognised usage payload from %s; not billing it", model)
             return
         self.usage.append(Usage(agent, model, int(prompt or 0), int(completion or 0)))
+
+    def image(self, prompt: str, *, agent: str = "illustrator") -> bytes | None:
+        """One generated image, or None when there is no image provider to call.
+
+        Only OpenAI is wired up: Anthropic has no image generation, and a stream
+        running on Anthropic falls back to the deterministic matplotlib templates.
+        """
+        if self.dry_run or self.provider != "openai":
+            return None
+        model = settings.image_model
+        result = self._openai().images.generate(
+            model=model,
+            prompt=prompt,
+            size=settings.image_size,
+            quality=settings.image_quality,
+            n=1,
+        )
+        data = result.data[0].b64_json if result.data else None
+        if not data:
+            log.warning("image provider returned no image data")
+            return None
+        self.usage.append(Usage(agent, model, 0, 0, images=1))
+        return base64.b64decode(data)
 
     def complete_json(self, prompt: str, **kwargs: Any) -> Any | None:
         raw = self.complete(prompt, **kwargs)

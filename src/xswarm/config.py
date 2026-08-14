@@ -35,6 +35,8 @@ class Settings(BaseSettings):
             "claude-3-5-haiku-latest": (0.80, 4.00),
         }
     )
+    # USD per generated image, by model. Priced for the configured size and quality.
+    image_prices: dict[str, float] = Field(default={"gpt-image-1": 0.063})
     monthly_budget_usd: float = 20.0
 
     semantic_scholar_api_key: str | None = None
@@ -100,6 +102,28 @@ class Settings(BaseSettings):
     assets_dir: Path = REPO_ROOT / "assets"
     visual_width_px: int = 1600
     visual_height_px: int = 900
+    # "render" = deterministic matplotlib only; "generate" = text-to-image only;
+    # "auto" = a chart whenever there are real numbers to plot, generated art otherwise,
+    # so a model never draws a data visual it could get wrong.
+    visual_mode: str = "auto"
+    image_model: str = "gpt-image-1"
+    image_size: str = "1536x1024"
+    image_quality: str = "medium"
+    # Named looks defined in prompts/art_direction.md. The Illustrator picks one.
+    art_styles: list[str] = Field(
+        default=[
+            "frontier_diagram",
+            "risk_dark",
+            "data_poster",
+            "clinical_calm",
+            "concept_hero",
+        ]
+    )
+    default_art_style: str = "frontier_diagram"
+
+    # Ingest: your own material (a link, a paper, a blog post, or pasted text).
+    ingest_max_chars: int = 24000
+    ingest_variants: int = 1
 
     # Publishing (Typefully v2). Without a key the Publisher stays in dry-run.
     typefully_api_key: str | None = None
