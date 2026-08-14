@@ -20,6 +20,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 # tables so the dashboard can compare the two streams with one query.
 STREAM_ML = "ml"
 STREAM_CARE = "care"
+# Material you hand the pipeline yourself: a link, a paper, a blog post, pasted text.
+STREAM_OWN = "own"
 
 
 def utcnow() -> dt.datetime:
@@ -180,9 +182,7 @@ class PostMetric(Base):
     Strategist can compare like-for-like at a fixed age (24h)."""
 
     __tablename__ = "post_metrics"
-    __table_args__ = (
-        UniqueConstraint("publication_id", "captured_at", name="uq_metric_snapshot"),
-    )
+    __table_args__ = (UniqueConstraint("publication_id", "captured_at", name="uq_metric_snapshot"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     publication_id: Mapped[int] = mapped_column(ForeignKey("publications.id"), index=True)

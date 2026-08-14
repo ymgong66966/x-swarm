@@ -56,13 +56,17 @@ def next_slots(
     return chosen
 
 
-def _queued_times(session: Session) -> list[dt.datetime]:
+def queued_times(session: Session) -> list[dt.datetime]:
+    """Times already on the queue, so a new post is never stacked on top of one."""
     rows = session.scalars(
         select(Publication.scheduled_for).where(
             Publication.status.in_(("scheduled", "planned", "pending"))
         )
     )
-    return [row for row in rows if row is not None]
+    # SQLite drops the offset, so a stored slot comes back as bare wall time in the
+    # publishing timezone; labelling it UTC would put the spacing check hours out.
+    tz = ZoneInfo(settings.publish_timezone)
+    return [row if row.tzinfo else row.replace(tzinfo=tz) for row in rows if row is not None]
 
 
 def _thread(draft: Draft) -> list[str]:
@@ -136,9 +140,7 @@ def run(
             .where(Draft.status == "ready_for_review", Draft.publication == None)  # noqa: E711
             .order_by(Draft.created_at)
         )
-        approved += [
-            d for d in auto if d.features.get("pillar") in settings.autopublish_pillars
-        ]
+        approved += [d for d in auto if d.features.get("pillar") in settings.autopublish_pillars]
     if limit is not None:
         approved = approved[:limit]
     if not approved:
@@ -146,7 +148,7 @@ def run(
         return []
 
     client = None if dry_run or not settings.typefully_api_key else TypefullyClient()
-    slots = next_slots(len(approved), taken=_queued_times(session))
+    slots = next_slots(len(approved), taken=queued_times(session))
     publications = [
         publish(session, draft, when, client=client, plan_only=plan_only)
         for draft, when in zip(approved, slots, strict=False)

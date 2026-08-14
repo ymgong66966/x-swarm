@@ -47,6 +47,9 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm roundup` | Compose the weekly curation thread from the last 7 days of candidates |
 | `xswarm review` / `approve` | Human-in-the-loop queue |
 | `xswarm render --draft-id 7` | Re-render one draft's visual |
+| `xswarm illustrate --draft-id 7` | Generate house-style art for a draft (`--style` to force one) |
+| `xswarm ingest add <link\|file\|text>` | Your own material → thread + visual, held for review |
+| `xswarm ingest schedule 12` | Queue an **approved** ingest draft in Typefully |
 | `xswarm publish` | Queue approved drafts in Typefully at the next free slots |
 | `xswarm sync-metrics` | Pull X analytics for published posts |
 | `xswarm strategy` | Aggregate performance and rewrite `playbook.md` |
@@ -161,6 +164,58 @@ rejected and the post falls back to a typographic card.
 Cards render to `assets/` (gitignored) at 1600×900 on a dark background, one per brief, only
 for drafts that already cleared the Editor. Alt text is derived from the spec, not the model,
 so it always describes what was actually drawn.
+
+### Generated art
+
+When there is no measured number to plot, the **Illustrator** writes an art spec and
+`gpt-image-1` draws it. The split is deliberate: anything factual is rendered by matplotlib,
+anything conceptual is generated, and a failed generation falls back to a rendered card
+rather than shipping a bare post.
+
+`XSWARM_VISUAL_MODE` picks the policy: `auto` (default, generate only where there is no data),
+`render` (never generate), `generate` (always try). The house look lives in
+`prompts/art_direction.md` — dark `#0d1117`, one blue and one orange accent, flat editorial
+illustration, no faces or chrome — and every prompt ends with a hard *no text, no numbers, no
+labels, no logos* constraint, because generated type is the fastest way to look fake. Image
+models honour that maybe two times in three, so every generated image is read back by the
+fast model; one with words in it is retried once and then abandoned for a rendered card.
+
+| Style | Used for |
+|---|---|
+| `frontier_diagram` | Architectures, mechanisms, how a method works |
+| `risk_dark` | Failure modes, over-claims, counterpoints |
+| `data_poster` | A measured jump, drawn as poster geometry (the number stays in the text) |
+| `clinical_calm` | Care-stream posts: objects and rooms, never medical drama |
+| `concept_hero` | Opinion posts, essays, your own work |
+
+```bash
+.venv/bin/xswarm illustrate --draft-id 7                       # any draft, any stream
+.venv/bin/xswarm illustrate --draft-id 7 --style clinical_calm # force the look
+```
+
+Images cost ~$0.063 each and are counted per stream by `xswarm cost` and the dashboard.
+
+## Your own material
+
+A link, an arXiv paper, your blog, a text file, or pasted text — turned into a thread with a
+visual, held for review, then queued.
+
+```bash
+.venv/bin/xswarm ingest add https://arxiv.org/abs/2404.19756
+.venv/bin/xswarm ingest add ~/notes/post.md --image ~/figs/latency.png --alt "Latency chart"
+.venv/bin/xswarm ingest add "Some text you just wrote." --no-illustrate
+.venv/bin/xswarm review && .venv/bin/xswarm approve 12
+.venv/bin/xswarm ingest schedule 12
+```
+
+arXiv links and bare ids go through the arXiv API (title, abstract, authors); everything else
+is fetched and stripped to headings and paragraphs. The source text is stored on the draft as
+grounding, so the same Editor gate that guards the ML stream also blocks any number the
+writer invented. The URL is kept out of the posts and lands in the trailing link reply.
+
+Images you pass with `--image` are copied into `assets/` and used as-is; otherwise the
+Illustrator draws one. `xswarm ingest schedule` refuses any draft that is not `approved` —
+that gate is not bypassable by flags.
 
 ## Publishing
 
