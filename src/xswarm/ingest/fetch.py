@@ -36,6 +36,14 @@ _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"[ \t\r\f\v]+")
 
 MIN_BLOCK_CHARS = 20
+# What a path looks like, as opposed to a sentence you pasted. Anything matching this
+# has to exist on disk: silently treating a typo'd path as prose makes a garbage draft.
+_LOOKS_LIKE_PATH = re.compile(r"^[~./]|^[\w.\-/]+\.(?:md|markdown|txt|rst|html?|json|tex)$")
+_LOOKS_LIKE_ARXIV = re.compile(r"^(?:arxiv[:/]|\d{4}\.\d+$)", re.IGNORECASE)
+
+
+class IngestError(ValueError):
+    """Something about the source, not about our code. The CLI prints it as one line."""
 
 
 @dataclass(slots=True)
@@ -90,13 +98,16 @@ def from_html(html: str, url: str) -> Material:
 
 def from_arxiv(arxiv_id: str, client: httpx.Client) -> Material:
     """The abstract page is mostly chrome; the Atom API gives the abstract and authors."""
-    response = client.get(
-        ARXIV_API, params={"id_list": arxiv_id, "max_results": 1}, timeout=TIMEOUT
-    )
-    response.raise_for_status()
+    try:
+        response = client.get(
+            ARXIV_API, params={"id_list": arxiv_id, "max_results": 1}, timeout=TIMEOUT
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise IngestError(f"could not reach arXiv for {arxiv_id}: {exc}") from exc
     entries = feedparser.parse(response.text).entries
-    if not entries:
-        raise ValueError(f"arXiv returned no entry for {arxiv_id}")
+    if not entries or not str(entries[0].get("summary", "")).strip():
+        raise IngestError(f"arXiv has no paper {arxiv_id}")
     entry = entries[0]
     return Material(
         title=_WS.sub(" ", entry.get("title", arxiv_id)).replace("\n", " ").strip(),
@@ -114,9 +125,20 @@ def from_url(url: str, client: httpx.Client | None = None) -> Material:
         arxiv = ARXIV_URL.search(url)
         if arxiv:
             return from_arxiv(arxiv.group(1), client)
-        response = client.get(url, timeout=TIMEOUT)
-        response.raise_for_status()
-        return from_html(response.text, url)
+        try:
+            response = client.get(url, timeout=TIMEOUT)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise IngestError(f"{url} returned HTTP {exc.response.status_code}") from exc
+        except httpx.HTTPError as exc:
+            raise IngestError(f"could not fetch {url}: {exc}") from exc
+        kind = response.headers.get("content-type", "").split(";")[0].strip()
+        if kind and not kind.startswith(("text/", "application/xhtml")):
+            raise IngestError(f"{url} is {kind}, not a page I can read")
+        material = from_html(response.text, url)
+        if not material.text.strip():
+            raise IngestError(f"no readable article text at {url}")
+        return material
     finally:
         if owns:
             client.close()
@@ -130,7 +152,15 @@ def load(source: str, client: httpx.Client | None = None) -> Material:
     arxiv = ARXIV_ID.match(candidate)
     if arxiv:
         return from_url(f"https://arxiv.org/abs/{arxiv.group(1)}", client)
+    if " " not in candidate and _LOOKS_LIKE_ARXIV.match(candidate):
+        raise IngestError(f"{candidate!r} is not a valid arXiv id (expected 2401.12345)")
     path = Path(candidate).expanduser()
-    if len(candidate) < 400 and path.is_file():
+    if len(candidate) < 400 and "\n" not in candidate and _LOOKS_LIKE_PATH.match(candidate):
+        if not path.is_file():
+            raise IngestError(f"no such file: {path}")
         return from_file(path)
+    if path.is_file():
+        return from_file(path)
+    if not candidate:
+        raise IngestError("nothing readable in that source")
     return from_text(candidate)

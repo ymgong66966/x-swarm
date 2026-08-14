@@ -163,3 +163,30 @@ def test_image_cost_is_billed_to_the_stream_that_asked(session, brief, tmp_path,
     llm = FakeLLM({"style": "risk_dark", "subject": "A lattice"}, image=PNG)
     illustrator.illustrate(session, draft, llm)
     assert {u.agent for u in llm.usage} == {"illustrator_ml"}
+
+
+class TextReadingLLM(FakeLLM):
+    """An image provider whose output the vision check can read words in."""
+
+    def __init__(self, verdicts: list[str]):
+        super().__init__({})
+        self.verdicts = verdicts
+        self.looked: list[bytes] = []
+
+    def look(self, image, question, *, agent="illustrator"):
+        self.looked.append(image)
+        return self.verdicts.pop(0)
+
+
+def test_an_image_with_text_in_it_is_retried(tmp_path):
+    llm = TextReadingLLM(["YES", "NO"])
+    path = imagegen.generate(ArtSpec(subject="a lattice"), tmp_path / "art.png", llm)
+    assert path is not None and path.exists()
+    assert len(llm.prompts) == 2
+    assert "previous attempt contained written words" in llm.prompts[1]
+
+
+def test_an_image_that_keeps_its_text_is_not_used(tmp_path):
+    llm = TextReadingLLM(["YES", "YES"])
+    assert imagegen.generate(ArtSpec(subject="a lattice"), tmp_path / "art.png", llm) is None
+    assert not (tmp_path / "art.png").exists()

@@ -76,13 +76,40 @@ def build_prompt(spec: ArtSpec) -> str:
     return "\n\n".join(part for part in parts if part)
 
 
+TEXT_QUESTION = (
+    "Does this image contain any legible written words, letters, numbers, labels or "
+    "watermarks? Answer with one word: YES or NO."
+)
+RETRY_SUFFIX = (
+    "\n\nCritical: the previous attempt contained written words. Draw shapes only. "
+    "Any glyph, label, caption or number is a failed image."
+)
+
+
+def has_text(data: bytes, llm: LLM, *, agent: str = "illustrator") -> bool:
+    """Whether the model can read words in its own output. A no-answer counts as clean,
+    so an unavailable checker never blocks an image."""
+    verdict = llm.look(data, TEXT_QUESTION, agent=agent)
+    return verdict is not None and verdict.strip().upper().startswith("YES")
+
+
 def generate(spec: ArtSpec, path: Path, llm: LLM, *, agent: str = "illustrator") -> Path | None:
-    """Render one image to disk. Returns None when no image provider is available,
-    which is the dry-run and Anthropic-only path."""
-    data = llm.image(build_prompt(spec), agent=agent)
-    if data is None:
-        return None
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
-    log.info("generated image %s in style %s", path.name, spec.style)
-    return path
+    """Render one image to disk. Returns None when no image provider is available or
+    when every attempt came back with text in it, so the caller falls back to a card.
+
+    Image models honour "no text" maybe two times in three, and typography they invent
+    is always subtly wrong, so a text-bearing image is treated as a failed generation.
+    """
+    prompt = build_prompt(spec)
+    for attempt in range(2):
+        data = llm.image(prompt if attempt == 0 else prompt + RETRY_SUFFIX, agent=agent)
+        if data is None:
+            return None
+        if has_text(data, llm, agent=agent):
+            log.warning("generated image %s has text in it (attempt %s)", spec.style, attempt + 1)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        log.info("generated image %s in style %s", path.name, spec.style)
+        return path
+    return None

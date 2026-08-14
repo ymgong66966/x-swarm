@@ -87,3 +87,25 @@ def test_blocks_when_brief_has_no_grounded_claims(brief):
 def test_blocks_overlong_post(brief):
     draft = make_draft(brief, "x" * 400, alt_text="chart")
     assert any("too long" in n for n in deterministic_checks(draft, brief, []))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "This cuts memory use by ninety percent.",
+        "Throughput is three times what the baseline managed.",
+        "It is a two-orders-of-magnitude win.",
+    ],
+)
+def test_blocks_ungrounded_numbers_written_as_words(brief, body):
+    """Spelling a number out is the obvious way around a digit-only check."""
+    draft = make_draft(brief, body, alt_text="chart")
+    assert any(
+        "not present in the brief" in note for note in deterministic_checks(draft, brief, [])
+    )
+
+
+def test_allows_word_numbers_that_are_in_the_brief(brief):
+    brief.grounded_claims = [*(brief.grounded_claims or []), "Latency is three times lower."]
+    draft = make_draft(brief, "Latency ends up three times lower on this workload.", alt_text="c")
+    assert deterministic_checks(draft, brief, []) == []

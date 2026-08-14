@@ -63,7 +63,12 @@ def queued_times(session: Session) -> list[dt.datetime]:
             Publication.status.in_(("scheduled", "planned", "pending"))
         )
     )
-    return [row for row in rows if row is not None]
+    # SQLite hands back naive datetimes; the slot arithmetic below is timezone-aware.
+    return [
+        row if row.tzinfo else row.replace(tzinfo=dt.timezone.utc)
+        for row in rows
+        if row is not None
+    ]
 
 
 def _thread(draft: Draft) -> list[str]:

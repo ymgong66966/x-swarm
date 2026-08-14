@@ -207,3 +207,70 @@ def test_dry_run_scheduling_never_calls_typefully(session, monkeypatch):
     assert publication.status == "pending"
     assert publication.scheduled_for == when
     assert draft.status == "approved"
+
+
+# ------------------------------------------------------------------ source robustness
+
+
+def test_a_path_that_does_not_exist_is_an_error_not_a_post():
+    with pytest.raises(fetch.IngestError, match="no such file"):
+        fetch.load("/tmp/does-not-exist.md")
+
+
+def test_a_malformed_arxiv_id_is_rejected():
+    with pytest.raises(fetch.IngestError, match="not a valid arXiv id"):
+        fetch.load("arxiv:2401.9")
+
+
+@respx.mock
+def test_an_arxiv_id_with_no_paper_behind_it_is_an_error():
+    respx.get(fetch.ARXIV_API).mock(
+        return_value=httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"></feed>')
+    )
+    with pytest.raises(fetch.IngestError, match="no paper"):
+        fetch.load("2401.00001")
+
+
+@respx.mock
+def test_http_errors_surface_as_one_line_not_a_traceback():
+    respx.get("https://example.com/gone").mock(return_value=httpx.Response(404))
+    with pytest.raises(fetch.IngestError, match="HTTP 404"):
+        fetch.load("https://example.com/gone")
+
+
+@respx.mock
+def test_a_pdf_is_refused_rather_than_stripped_into_noise():
+    url = "https://example.com/paper.pdf"
+    respx.get(url).mock(
+        return_value=httpx.Response(
+            200, content=b"%PDF-1.7", headers={"content-type": "application/pdf"}
+        )
+    )
+    with pytest.raises(fetch.IngestError, match="not a page I can read"):
+        fetch.load(url)
+
+
+def test_prose_is_still_prose_even_when_it_mentions_a_file():
+    material = fetch.load("I rewrote loader.py today and it now streams shards.")
+    assert material.kind == "text"
+
+
+def test_a_missing_or_non_image_attachment_is_refused(tmp_path):
+    with pytest.raises(fetch.IngestError, match="no such image"):
+        ingest.check_image(tmp_path / "nope.png")
+    fake = tmp_path / "notanimage.txt"
+    fake.write_text("this is not a picture")
+    with pytest.raises(fetch.IngestError, match="not a PNG"):
+        ingest.check_image(fake)
+
+
+def test_scheduling_a_second_draft_does_not_trip_over_stored_times(session):
+    """SQLite returns naive datetimes; the slot arithmetic is timezone-aware."""
+    first, second = (
+        ingest.run(session, _material(), LLM(dry_run=True), illustrate_it=False) for _ in range(2)
+    )
+    times = []
+    for draft in (first, second):
+        draft.status = "approved"
+        times.append(ingest.schedule(session, draft, dry_run=True).scheduled_for)
+    assert times[0] != times[1]

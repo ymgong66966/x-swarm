@@ -23,7 +23,7 @@ from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import STREAM_OWN, Asset, Draft, Publication
 from ..publishers import TypefullyClient
-from .fetch import Material
+from .fetch import IngestError, Material
 
 log = logging.getLogger(__name__)
 
@@ -101,11 +101,26 @@ def _link_reply(material: Material, suggested: str) -> str:
     return f"{suggested.strip()} {material.url}".strip()
 
 
+# The formats X accepts, identified by their magic bytes rather than by extension.
+_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"RIFF")
+
+
+def check_image(path: Path) -> None:
+    """Fail before anything is written. A mistyped path or a text file that reaches the
+    publisher as an attachment is a broken post, so it is rejected here."""
+    if not path.is_file():
+        raise IngestError(f"no such image: {path}")
+    header = path.open("rb").read(12)
+    if not header.startswith(_IMAGE_MAGIC):
+        raise IngestError(f"{path} is not a PNG, JPEG, GIF or WebP image")
+
+
 def attach_images(session: Session, draft: Draft, paths: list[Path], alt: str) -> list[Asset]:
     """Images you supplied yourself. Copied into the assets directory so the publisher
     reads them from one place and the original cannot be moved out from under it."""
     assets: list[Asset] = []
     for index, source in enumerate(paths):
+        check_image(source)
         destination = settings.assets_dir / f"draft-{draft.id}-own-{index}{source.suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)

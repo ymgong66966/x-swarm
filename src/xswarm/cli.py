@@ -200,7 +200,12 @@ def ingest_add_cmd(
     """Turn your own material into an X thread, illustrated and edited, for review."""
     _setup_logging(verbose)
     init_db()
-    material = ingest_fetch.load(source)
+    try:
+        for path in image or []:
+            ingest_pipeline.check_image(path)
+        material = ingest_fetch.load(source)
+    except ingest_fetch.IngestError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     if not material.text.strip():
         raise typer.BadParameter("nothing readable in that source")
     llm = LLM(dry_run=dry_run)

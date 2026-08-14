@@ -159,6 +159,33 @@ class LLM:
         self.usage.append(Usage(agent, model, 0, 0, images=1))
         return base64.b64decode(data)
 
+    def look(self, image: bytes, question: str, *, agent: str = "illustrator") -> str | None:
+        """Ask the fast model about an image. Used to police the generated art, since
+        image models ignore 'no text' often enough to need checking rather than trusting."""
+        if self.dry_run or self.provider != "openai":
+            return None
+        model = settings.openai_fast_model
+        encoded = base64.b64encode(image).decode()
+        completion = self._openai().chat.completions.create(
+            model=model,
+            max_tokens=50,
+            messages=[
+                {"role": "system", "content": DEFAULT_SYSTEM},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                        },
+                    ],
+                },
+            ],
+        )
+        self._track(agent, model, completion.usage)
+        return completion.choices[0].message.content
+
     def complete_json(self, prompt: str, **kwargs: Any) -> Any | None:
         raw = self.complete(prompt, **kwargs)
         if raw is None:

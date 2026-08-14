@@ -98,10 +98,10 @@ def has_plottable_data(brief: Brief) -> bool:
     return bool(brief.key_number and NUMBER_RE.search(brief.key_number))
 
 
-def attach_visual(session: Session, draft: Draft, llm: LLM) -> Asset:
+def attach_visual(session: Session, draft: Draft, llm: LLM) -> Asset | None:
     """One image per draft, chosen by `visual_mode`. Generated art is attempted first
-    only where there is no data to plot, and a failed generation still falls back to a
-    rendered card so the draft is never left without a visual."""
+    only where there is no data to plot, and a failed generation falls back to a rendered
+    card — except for briefless drafts, which have nothing for the templates to draw."""
     brief = draft.brief
     generated = settings.visual_mode == "generate" or (
         settings.visual_mode == "auto" and brief is not None and not has_plottable_data(brief)
@@ -110,6 +110,8 @@ def attach_visual(session: Session, draft: Draft, llm: LLM) -> Asset:
         asset = illustrate(session, draft, llm)
         if asset is not None:
             return asset
+    if brief is None:
+        return None
     return visualize(session, draft, llm)
 
 
@@ -124,7 +126,11 @@ def _one_per_brief(drafts: list[Draft]) -> list[Draft]:
 def run(session: Session, llm: LLM, drafts: list[Draft]) -> list[Asset]:
     # Roundup threads have no single brief to draw from; they ship text-only.
     with_brief = [d for d in drafts if d.brief is not None]
-    assets = [attach_visual(session, draft, llm) for draft in _one_per_brief(with_brief)]
+    assets = [
+        asset
+        for draft in _one_per_brief(with_brief)
+        if (asset := attach_visual(session, draft, llm)) is not None
+    ]
     session.flush()
     log.info("attached %d visuals", len(assets))
     return assets
