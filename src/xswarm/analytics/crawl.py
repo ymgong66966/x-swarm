@@ -132,6 +132,21 @@ def check_url(
     started = dt.datetime.now(dt.timezone.utc)
     status = 0
     page: dict[str, str] = {}
+    if not allowed:
+        # Reporting that a page is blocked must not itself ignore the block.
+        return CrawlCheck(
+            url=url,
+            stream=stream,
+            status_code=status,
+            robots_allowed=False,
+            in_sitemap=any(entry.rstrip("/") == url.rstrip("/") for entry in sitemap),
+            indexable=False,
+            title="",
+            meta_description="",
+            canonical="",
+            issues=["blocked by robots.txt"],
+            response_ms=0.0,
+        )
     try:
         response = client.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
         status = response.status_code

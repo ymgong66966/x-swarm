@@ -111,6 +111,43 @@ def test_a_question_about_coverage_is_not_a_promise() -> None:
     assert editor.check(make_article(body)) == []
 
 
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # Promises that carry no auxiliary verb.
+        "Medicare reimburses every completed session in full.",
+        "Medicare will pay you for every training session, if your NPI is enrolled.",
+        "Providers can be sure these visits are paid by Medicare.",
+        # Anecdotes that read as invented or as PHI.
+        "A caregiver we worked with, Maria, 68, could not manage transfers after her stroke.",
+        "Last month a family in Ohio told us their mother was readmitted twice.",
+        # Direction about a medication, however it is framed.
+        "Have the caregiver reduce the dose overnight if the patient seems drowsy.",
+        "Stop the medication if drowsiness appears.",
+        "You should give them an extra dose when the pain returns.",
+        # Statistics stated without a source, including word and ratio forms.
+        "Medicare pays $89 per 15-minute session.",
+        "Twenty-seven of every 100 caregivers report no training at all.",
+        "Roughly 1 in 3 discharges fail because nobody at home was trained.",
+    ],
+)
+def test_unsafe_sentences_found_in_adversarial_testing_are_blocked(sentence: str) -> None:
+    assert editor.check(make_article(BODY + "\n" + sentence + "\n"))
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Alverna's provider onboarding takes about 30 minutes.",
+        "A licensed clinician leads a 30-minute session.",
+        f"Medicare pays for caregiver training when the plan documents it ([CMS]({CMS})).",
+        "Coverage varies by plan, and copays may apply.",
+    ],
+)
+def test_ordinary_product_and_hedged_copy_survives(sentence: str) -> None:
+    assert editor.check(make_article(BODY + "\n" + sentence + "\n")) == []
+
+
 def test_invented_patient_story_is_blocked() -> None:
     body = BODY + "\nOne of our patients could not manage transfers at home.\n"
     assert any("invented patient" in note for note in editor.check(make_article(body)))

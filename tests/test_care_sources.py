@@ -78,10 +78,10 @@ PAGE = """<html><head>
 NOINDEX = '<html><head><title>t</title><meta name="robots" content="noindex"></head></html>'
 
 
-def test_crawl_flags_a_blocked_unlisted_page(session) -> None:
+def test_crawl_flags_a_noindex_unlisted_page(session) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
-            return httpx.Response(200, text="User-agent: *\nDisallow: /blog\n")
+            return httpx.Response(200, text="User-agent: *\nAllow: /\n")
         if request.url.path == "/sitemap.xml":
             return httpx.Response(404)
         return httpx.Response(200, text=NOINDEX, headers={"content-type": "text/html"})
@@ -93,10 +93,28 @@ def test_crawl_flags_a_blocked_unlisted_page(session) -> None:
 
     check = checks[0]
     assert check.stream == STREAM_CARE
-    assert check.robots_allowed is False
     assert check.indexable is False
-    assert any("robots" in issue for issue in check.issues)
     assert any("noindex" in issue for issue in check.issues)
+    assert any("sitemap" in issue for issue in check.issues)
+
+
+def test_crawl_does_not_fetch_a_disallowed_page(session) -> None:
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(request.url.path)
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nDisallow: /providers\n")
+        return httpx.Response(200, text=PAGE, headers={"content-type": "text/html"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        check = crawl.run(
+            session, urls=["https://alvernahealth.com/providers"], client=client
+        )[0]
+
+    assert "/providers" not in requested  # reporting the block must not bypass it
+    assert check.robots_allowed is False
+    assert check.issues == ["blocked by robots.txt"]
 
 
 def test_crawl_passes_a_healthy_listed_page(session) -> None:

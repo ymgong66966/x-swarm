@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+import pytest
 from sqlalchemy.orm import Session
 
 from xswarm.analytics import dashboard
@@ -148,6 +149,28 @@ def test_promo_check_blocks_unsafe_copy() -> None:
     assert any("promises" in note for note in promoter.check(promise))
     hashtag = Draft(body="Train caregivers #medicare", features={"channel": "x"}, variant=0)
     assert any("hashtag" in note for note in promoter.check(hashtag))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Medicare will pay you for every session you document.",
+        "Medicare reimburses these sessions in full.",
+        "Providers can be sure these visits are paid by Medicare.",
+    ],
+)
+def test_promo_check_blocks_promises_without_an_auxiliary_verb(body: str) -> None:
+    draft = Draft(body=body, features={"channel": "x"}, variant=0)
+    assert any("promises" in note for note in promoter.check(draft))
+
+
+def test_promo_check_allows_hedged_copy() -> None:
+    draft = Draft(
+        body="Caregiver training may be billable when it is tied to the treatment plan.",
+        features={"channel": "x"},
+        variant=0,
+    )
+    assert promoter.check(draft) == []
 
 
 def test_export_writes_frontmatter(session: Session, tmp_path) -> None:

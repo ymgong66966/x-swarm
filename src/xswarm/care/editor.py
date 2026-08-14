@@ -30,24 +30,49 @@ REGULATORY_RE = re.compile(
 )
 # Codes are the load-bearing detail of this subject; they may not be asserted loosely.
 CODE_RE = re.compile(r"\b(?:9[67]\d{3}|G0\d{3})\b")
-# Promises no publisher can make.
+# Promises no publisher can make: an outcome asserted for the reader.
 PROMISE_RE = re.compile(
-    r"\b(?:will|are|is|get|gets)\s+(?:be\s+)?(?:reimbursed|paid|covered|approved)\b"
+    r"\b(?:will|get|gets)\s+(?:be\s+)?(?:reimbursed|paid|covered|approved)\b"
+    r"|\bwill\s+(?:pay|reimburse|cover|approve)\b"
     r"|\bwe\s+guarantee\b|\balways\s+(?:covered|reimbursed|approved)\b",
     re.IGNORECASE,
 )
+# Describing how payment works. Only a promise once it claims to hold every time.
+PAYMENT_RE = re.compile(
+    r"\b(?:reimburses|pays|covers|approves)\b|\b(?:are|is)\s+(?:reimbursed|paid|covered)\b",
+    re.IGNORECASE,
+)
+# Assurance beats hedging: "you can be sure" is a promise however softly it is phrased.
+ASSURANCE_RE = re.compile(
+    r"\b(?:can be sure|rest assured|no need to worry|guaranteed|without exception)\b",
+    re.IGNORECASE,
+)
+# A conditional does not rescue a claim that also says it holds every time.
+UNIVERSAL_RE = re.compile(
+    r"\b(?:every|all|each|any|always|in full|automatically)\b", re.IGNORECASE
+)
 # Personalised clinical direction. Teaching a skill is fine; directing care is not.
 CLINICAL_DIRECTIVE_RE = re.compile(
-    r"\byou should (?:stop|start|take|increase|decrease|reduce|adjust|discontinue|switch)\b"
-    r"|\b(?:stop|start|adjust|increase|reduce) (?:your|their|his|her)"
-    r" (?:medication|dose|dosage|insulin|oxygen)\b"
+    r"\byou should (?:stop|start|take|give|administer|increase|decrease|reduce|adjust"
+    r"|discontinue|switch|withhold|double)\b"
+    # Any imperative aimed at a medication, however it is framed.
+    r"|\b(?:stop|start|adjust|increase|reduce|double|halve|give|administer|withhold|skip)"
+    r"\s+(?:the|your|their|his|her|an?|another|extra)?\s*"
+    r"(?:medication|medicine|dose|dosage|insulin|oxygen|pills?)\b"
     r"|\bdo not (?:call|contact) (?:your|their) (?:doctor|clinician|physician)\b",
     re.IGNORECASE,
 )
 # Sentences that read as first-person patient anecdote invite invented PHI.
 INVENTED_PATIENT_RE = re.compile(
-    r"\b(?:one of our patients|a patient of ours|my patient|our client,)\b", re.IGNORECASE
+    r"\b(?:one of our patients|a patient of ours|my patient|our client,)\b"
+    r"|\ba (?:caregiver|patient|family|client|daughter|son|spouse|wife|husband)"
+    r"\s+(?:we|I)\s+(?:worked with|work with|met|spoke with|saw|helped|trained)\b"
+    r"|\b(?:a|one) (?:family|caregiver|patient|daughter|son)\b[^.]{0,60}?"
+    r"\btold (?:us|me)\b",
+    re.IGNORECASE,
 )
+# "Maria, 68," — a named person with an age is either real PHI or invented.
+NAMED_AGE_RE = re.compile(r"\b[A-Z][a-z]+,\s?\d{1,3},")
 # Conditionals turn a promise back into an accurate description of how coverage works.
 HEDGE_RE = re.compile(
     r"\b(?:may|might|can|could|if|when|where|subject to|typically|generally|often|depends)\b",
@@ -56,7 +81,22 @@ HEDGE_RE = re.compile(
 PAYER_RE = re.compile(
     r"\b(?:medicare|medicaid|payer|payor|insurer|insurance|plan)\b", re.IGNORECASE
 )
-NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\s?(?:%|percent|million|billion|days?|hours?|minutes?)\b")
+# Any figure, used to decide whether a regulatory sentence is asserting something exact.
+NUMBER_RE = re.compile(
+    r"\$\s?\d[\d,]*(?:\.\d+)?"
+    r"|\b\d+(?:\.\d+)?\s?(?:%|percent|million|billion|days?|hours?|minutes?)\b",
+    re.IGNORECASE,
+)
+# A figure that reads as evidence and therefore needs a source. Plain durations
+# ("a 30-minute session") describe the product and are deliberately excluded.
+STAT_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s?(?:%|percent)\b"
+    r"|\$\s?\d[\d,]*(?:\.\d+)?"
+    r"|\b\d+(?:\.\d+)?\s?(?:million|billion)\b"
+    r"|\b\d+\s+in\s+\d+\b"
+    r"|\b[\w-]+\s+(?:out of|of every)\s+\d+\b",
+    re.IGNORECASE,
+)
 
 
 def _is_authoritative(host: str) -> bool:
@@ -73,11 +113,14 @@ def _sentences(text: str) -> list[str]:
 
 def promises_outcome(sentence: str) -> bool:
     """A payment or coverage guarantee. Questions and hedged statements are not one."""
-    if not PROMISE_RE.search(sentence) or sentence.rstrip().endswith("?"):
+    if sentence.rstrip().endswith("?") or not PAYER_RE.search(sentence):
         return False
-    if HEDGE_RE.search(sentence):
+    promised = bool(PROMISE_RE.search(sentence))
+    if not promised and not PAYMENT_RE.search(sentence):
         return False
-    return bool(PAYER_RE.search(sentence))
+    if ASSURANCE_RE.search(sentence) or UNIVERSAL_RE.search(sentence):
+        return True  # a guarantee is a guarantee, conditionals notwithstanding
+    return promised and not HEDGE_RE.search(sentence)
 
 
 def _cited(sentence: str) -> bool:
@@ -118,7 +161,7 @@ def check(article: Article) -> list[str]:
             notes.append(f"promises an outcome: {sentence[:90]!r}")
         if CLINICAL_DIRECTIVE_RE.search(sentence):
             notes.append(f"personalised clinical direction: {sentence[:90]!r}")
-        if INVENTED_PATIENT_RE.search(sentence):
+        if INVENTED_PATIENT_RE.search(sentence) or NAMED_AGE_RE.search(sentence):
             notes.append(f"invented patient anecdote: {sentence[:90]!r}")
 
         links = MARKDOWN_LINK.findall(sentence)
@@ -130,7 +173,7 @@ def check(article: Article) -> list[str]:
             _is_authoritative(urllib.parse.urlsplit(url).netloc.lower()) for url in links
         ):
             notes.append(f"billing/code claim without a government citation: {sentence[:90]!r}")
-        elif NUMBER_RE.search(sentence) and not _cited(sentence):
+        elif STAT_RE.search(sentence) and not _cited(sentence):
             notes.append(f"uncited statistic: {sentence[:90]!r}")
 
         if any(_is_signal(urllib.parse.urlsplit(url).netloc.lower()) for url in links) and (
