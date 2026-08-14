@@ -102,7 +102,7 @@ def _link_reply(material: Material, suggested: str) -> str:
 
 
 # The formats X accepts, identified by their magic bytes rather than by extension.
-_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"RIFF")
+_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
 
 
 def check_image(path: Path) -> None:
@@ -111,7 +111,9 @@ def check_image(path: Path) -> None:
     if not path.is_file():
         raise IngestError(f"no such image: {path}")
     header = path.open("rb").read(12)
-    if not header.startswith(_IMAGE_MAGIC):
+    # WebP is a RIFF container, so the format tag at byte 8 is what identifies it.
+    webp = header.startswith(b"RIFF") and header[8:12] == b"WEBP"
+    if not (webp or header.startswith(_IMAGE_MAGIC)):
         raise IngestError(f"{path} is not a PNG, JPEG, GIF or WebP image")
 
 

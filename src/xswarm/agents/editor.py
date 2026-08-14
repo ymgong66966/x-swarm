@@ -22,9 +22,12 @@ _WORD_NUMBERS = (
     r"(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|"
     r"seventy|eighty|ninety|hundred|thousand|million|billion|half|double|triple|quadruple)"
 )
+# A bare multiplier is still a quantity: "double the throughput" needs the same grounding.
+_BARE_MULTIPLIER = r"(?:doubles?|triples?|quadruples?|halves|halved)\s+(?:the|its|their|our)\b"
 WORD_NUMBER_RE = re.compile(
     rf"\b{_WORD_NUMBERS}(?:[- ]{_WORD_NUMBERS})*[- ]?"
-    r"(?:percent|percentage points?|x|times|fold|orders?[- ]of[- ]magnitude)\b",
+    r"(?:percent|percentage points?|x|times|fold|orders?[- ]of[- ]magnitude)\b"
+    rf"|\b{_BARE_MULTIPLIER}",
     re.IGNORECASE,
 )
 # First-person experience the account has not actually had. The voice is opinionated,

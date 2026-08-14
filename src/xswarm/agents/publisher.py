@@ -63,12 +63,10 @@ def queued_times(session: Session) -> list[dt.datetime]:
             Publication.status.in_(("scheduled", "planned", "pending"))
         )
     )
-    # SQLite hands back naive datetimes; the slot arithmetic below is timezone-aware.
-    return [
-        row if row.tzinfo else row.replace(tzinfo=dt.timezone.utc)
-        for row in rows
-        if row is not None
-    ]
+    # SQLite drops the offset, so a stored slot comes back as bare wall time in the
+    # publishing timezone; labelling it UTC would put the spacing check hours out.
+    tz = ZoneInfo(settings.publish_timezone)
+    return [row if row.tzinfo else row.replace(tzinfo=tz) for row in rows if row is not None]
 
 
 def _thread(draft: Draft) -> list[str]:

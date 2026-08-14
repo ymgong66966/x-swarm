@@ -6,6 +6,7 @@ import httpx
 import pytest
 import respx
 
+from xswarm.agents import publisher
 from xswarm.config import settings
 from xswarm.ingest import fetch
 from xswarm.ingest import pipeline as ingest
@@ -274,3 +275,25 @@ def test_scheduling_a_second_draft_does_not_trip_over_stored_times(session):
         draft.status = "approved"
         times.append(ingest.schedule(session, draft, dry_run=True).scheduled_for)
     assert times[0] != times[1]
+
+
+def test_a_riff_container_that_is_not_webp_is_refused(tmp_path):
+    """WebP is RIFF, but so is WAV; the format tag at byte 8 is what matters."""
+    wav = tmp_path / "sound.bin"
+    wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+    with pytest.raises(fetch.IngestError, match="not a PNG"):
+        ingest.check_image(wav)
+    webp = tmp_path / "pic.webp"
+    webp.write_bytes(b"RIFF\x00\x00\x00\x00WEBPVP8 ")
+    ingest.check_image(webp)
+
+
+def test_queued_times_are_read_back_in_the_publishing_timezone(session):
+    """SQLite stores wall time; reading it as UTC would put slot spacing hours out."""
+    draft = ingest.run(session, _material(), LLM(dry_run=True), illustrate_it=False)
+    draft.status = "approved"
+    when = ingest.schedule(session, draft, dry_run=True).scheduled_for
+    session.flush()
+    queued = publisher.queued_times(session)
+    assert queued and all(t.utcoffset() == when.utcoffset() for t in queued)
+    assert queued[0].replace(tzinfo=None) == when.replace(tzinfo=None)

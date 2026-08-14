@@ -109,3 +109,8 @@ def test_allows_word_numbers_that_are_in_the_brief(brief):
     brief.grounded_claims = [*(brief.grounded_claims or []), "Latency is three times lower."]
     draft = make_draft(brief, "Latency ends up three times lower on this workload.", alt_text="c")
     assert deterministic_checks(draft, brief, []) == []
+
+
+def test_blocks_a_bare_ungrounded_multiplier(brief):
+    draft = make_draft(brief, "The rewrite gives double the throughput.", alt_text="chart")
+    assert any("not present in the brief" in n for n in deterministic_checks(draft, brief, []))
