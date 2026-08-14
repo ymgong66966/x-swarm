@@ -516,8 +516,12 @@ def care_status_cmd(check: bool = typer.Option(False, help="Also fetch each arti
         for article in articles:
             live = ""
             if check and article.site_branch:
-                ok, code = care_publish.is_live(care_publish.article_url(article))
-                live = "200" if ok else str(code or "no response")
+                ok, code = care_publish.is_live(
+                    care_publish.article_url(article),
+                    marker=care_publish.article_marker(article),
+                )
+                live = "200" if ok else ("200, wrong page" if code == 200 else str(code) or "")
+                live = live or "no response"
             approved = sum(1 for draft in article.promos if draft.status == "approved")
             table.add_row(
                 str(article.id),
@@ -531,7 +535,13 @@ def care_status_cmd(check: bool = typer.Option(False, help="Also fetch each arti
 
 
 @care_app.command("promote")
-def care_promote_cmd(article_id: int, verbose: bool = False) -> None:
+def care_promote_cmd(
+    article_id: int,
+    force: bool = typer.Option(
+        False, help="Accept a bare 200 — use only if you have opened the URL yourself"
+    ),
+    verbose: bool = False,
+) -> None:
     """Release an article's promo posts — only once its URL actually resolves."""
     _setup_logging(verbose)
     init_db()
@@ -540,12 +550,23 @@ def care_promote_cmd(article_id: int, verbose: bool = False) -> None:
         if article is None:
             raise typer.BadParameter(f"no article {article_id}")
         url = care_publish.article_url(article)
-        live, status = care_publish.is_live(url)
+        marker = "" if force else care_publish.article_marker(article)
+        live, status = care_publish.is_live(url, marker=marker)
         if not live:
-            console.print(
-                f"[red]{url} returned {status or 'no response'}[/red] — merge the site PR "
-                "first; promos must never link to a 404"
+            reason = (
+                "answered 200 with the site's fallback shell, not the article"
+                if status == 200
+                else f"returned {status or 'no response'}"
             )
+            console.print(
+                f"[red]{url} {reason}[/red] — merge the site PR first and give the deploy a "
+                "minute; promos must never link to a page that is not there"
+            )
+            if status == 200:
+                console.print(
+                    "if the page does look right in a browser, the host is not serving the "
+                    f"prerendered head tags — `xswarm care promote {article_id} --force`"
+                )
             raise typer.Exit(1)
         article.published_url = url
         article.status = "published"

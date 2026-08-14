@@ -93,6 +93,11 @@ when `XSWARM_GITHUB_TOKEN` is set (otherwise it prints the compare URL for you t
 `care sync-edits` reads the file back off the PR branch so the promo posts quote your final
 wording rather than the model's first draft.
 
+`care promote` needs more than a 200: the site is a single-page app whose host answers 200
+with the same shell for every unknown path, so the page must also mention the article's own
+path before the promos are released. If a page you can see in a browser is still refused, the
+host is not serving the prerendered head tags — `care promote <id> --force` overrides.
+
 ## Care stream
 
 ```

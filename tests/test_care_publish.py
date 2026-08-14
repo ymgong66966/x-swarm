@@ -260,6 +260,48 @@ def test_is_live_only_accepts_200() -> None:
     assert publish.is_live("https://alvernahealth.com/resources/missing", client) == (False, 404)
 
 
+def test_a_200_that_is_only_the_spa_shell_is_not_live() -> None:
+    """The host answers 200 with the homepage for every unknown path, so 200 proves nothing."""
+    shell = "<html><title>Alverna</title><link rel=canonical href=https://alvernahealth.com/>"
+    article = "<html><link rel=canonical href=https://alvernahealth.com/resources/live>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=article if "live" in request.url.path else shell)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    marker = publish.article_marker(make_article(slug="ghost"))
+    assert publish.is_live("https://alvernahealth.com/resources/ghost", client, marker=marker) == (
+        False,
+        200,
+    )
+    marker = publish.article_marker(make_article(slug="live"))
+    assert publish.is_live("https://alvernahealth.com/resources/live", client, marker=marker) == (
+        True,
+        200,
+    )
+
+
+def test_a_reviewer_deleting_a_frontmatter_line_does_not_blank_the_field() -> None:
+    article = make_article()
+    publish.apply_edits(article, publish.render(article))  # settle the body into the file's shape
+    without_dek = "\n".join(
+        line for line in publish.render(article).splitlines() if not line.startswith("dek: ")
+    )
+    assert publish.apply_edits(article, without_dek) == []
+    assert article.dek == "Three code families, one documentation habit."
+
+
+def test_renaming_the_slug_in_the_pull_request_is_refused() -> None:
+    """The URL, the promote gate and the promo links all come from our slug, not the file's."""
+    article = make_article()
+    renamed = publish.render(article).replace(
+        '"caregiver-training-you-can-bill"', '"bill-for-caregiver-training"'
+    )
+    with pytest.raises(publish.PublishError, match="renames the slug"):
+        publish.apply_edits(article, renamed)
+    assert article.slug == "caregiver-training-you-can-bill"
+
+
 def test_is_live_treats_an_unreachable_host_as_not_live() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("no route", request=request)

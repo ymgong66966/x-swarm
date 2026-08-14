@@ -121,19 +121,31 @@ def article_url(article: Article) -> str:
     return f"{settings.care_blog_base_url.rstrip('/')}/{article.slug}"
 
 
-def is_live(url: str, client: httpx.Client | None = None) -> tuple[bool, int]:
-    """Whether the article actually resolves. Promo posts must not link to a 404."""
+def is_live(url: str, client: httpx.Client | None = None, *, marker: str = "") -> tuple[bool, int]:
+    """Whether the article actually resolves. Promo posts must not link to a 404.
+
+    A status code alone is not enough: the site is a single-page app whose host serves the
+    same 200 shell for every unknown path, so `marker` (the article's own path) must appear
+    in the HTML before we believe the page exists.
+    """
     close = client is None
     client = client or httpx.Client(timeout=15.0, follow_redirects=True)
     try:
-        status = client.get(url).status_code
+        response = client.get(url)
     except httpx.HTTPError as error:
         log.warning("could not reach %s: %s", url, error)
         return False, 0
     finally:
         if close:
             client.close()
-    return status == 200, status
+    if response.status_code != 200:
+        return False, response.status_code
+    return (marker in response.text if marker else True), 200
+
+
+def article_marker(article: Article) -> str:
+    """What a page that really is this article must contain: its own path, in the canonical."""
+    return f"/{settings.care_blog_base_url.rstrip('/').split('/')[-1]}/{article.slug}"
 
 
 def parse_frontmatter(markdown: str) -> tuple[dict[str, object], str]:
@@ -184,9 +196,22 @@ def apply_edits(article: Article, markdown: str) -> list[str]:
         rendered = "\n\n".join(f"**{item.get('q', '')}**\n\n{item.get('a', '')}" for item in faq)
         body = f"{body}\n\n{FAQ_HEADING}\n\n{rendered}"
 
+    slug = _as_str(data.get("slug"))
+    date = _as_str(data.get("date"))
+    if slug and slug != article.slug:
+        raise PublishError(
+            f"the pull request renames the slug to {slug!r}; the published URL is built from "
+            f"{article.slug!r}, so revert that line (or republish the article under the new slug)"
+        )
+    if date and date != article.run_date.isoformat():
+        raise PublishError(
+            f"the pull request changes the date to {date!r}; the file name still says "
+            f"{article.run_date.isoformat()}, so revert that line"
+        )
+
     title = _as_str(data.get("title")) or article.title
     description = _as_str(data.get("description")) or article.meta_description
-    dek = _as_str(data.get("dek"))
+    dek = _as_str(data.get("dek")) or article.dek
     words = len(body.split())
 
     changes: list[str] = []
