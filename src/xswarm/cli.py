@@ -22,12 +22,17 @@ from .agents import (
     visualizer,
     writer,
 )
+from .analytics import crawl, dashboard, traffic
+from .care import export as care_export
+from .care import site as care_site
+from .care.graph import run_pipeline as run_care_pipeline
 from .config import settings
 from .db import init_db, session_scope
 from .evals import harness
 from .graph import run_pipeline
 from .llm import LLM
 from .models import (
+    Article,
     Asset,
     Brief,
     Candidate,
@@ -36,9 +41,12 @@ from .models import (
     ModelCall,
     PostMetric,
     Publication,
+    SiteFact,
 )
 
 app = typer.Typer(help="Agent swarm for an ML-frontier X account", no_args_is_help=True)
+care_app = typer.Typer(help="Care stream: healthcare articles and their promo posts")
+app.add_typer(care_app, name="care")
 console = Console()
 
 
@@ -310,8 +318,173 @@ def stats_cmd() -> None:
     """Row counts, for sanity-checking a run."""
     init_db()
     with session_scope() as session:
-        for model in (Item, Candidate, Brief, Draft, Asset, Publication, PostMetric, ModelCall):
+        for model in (
+            Item,
+            Candidate,
+            Brief,
+            Draft,
+            Asset,
+            Publication,
+            PostMetric,
+            ModelCall,
+            SiteFact,
+            Article,
+        ):
             console.print(f"{model.__tablename__}: {session.query(model).count()}")
+
+
+@care_app.command("sync-site")
+def care_sync_site_cmd(verbose: bool = False) -> None:
+    """Re-read alvernahealth.com so product claims come from the live site."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        facts = care_site.sync(session)
+        table = Table("audience", "section", "fact")
+        for fact in facts[:30]:
+            table.add_row(fact.audience, fact.section[:30], fact.text[:90])
+        console.print(table)
+        console.print(f"[green]{len(facts)} new facts[/green]")
+
+
+@care_app.command("run")
+def care_run_cmd(
+    dry_run: bool = False,
+    sync_site: bool = typer.Option(True, help="Refresh product facts from the website first"),
+    verbose: bool = False,
+) -> None:
+    """Full care pipeline: research -> curate -> plan -> write -> compliance -> promos."""
+    _setup_logging(verbose)
+    state = run_care_pipeline(dry_run=dry_run, sync_site=sync_site)
+    console.print(
+        f"items={len(state.get('item_ids', []))} "
+        f"candidates={len(state.get('candidate_ids', []))} "
+        f"articles={len(state.get('article_ids', []))} "
+        f"ready={len(state.get('ready_article_ids', []))} "
+        f"promos={len(state.get('promo_ids', []))} "
+        f"cost=${state.get('cost_usd', 0.0):.3f}"
+    )
+    with session_scope() as session:
+        table = Table("id", "status", "audience", "words", "title", "blocked because")
+        for article_id in state.get("article_ids", []):
+            article = session.get(Article, article_id)
+            if article is None:
+                continue
+            table.add_row(
+                str(article.id),
+                article.status,
+                article.audience,
+                str(article.word_count),
+                article.title[:60],
+                "; ".join(article.editor_notes)[:70],
+            )
+        console.print(table)
+        _print_drafts([session.get(Draft, did) for did in state.get("promo_ids", [])])
+
+
+@care_app.command("articles")
+def care_articles_cmd(limit: int = 10, status: str = "") -> None:
+    """List recent articles and where their markdown lives."""
+    init_db()
+    with session_scope() as session:
+        query = session.query(Article).order_by(Article.id.desc())
+        if status:
+            query = query.filter(Article.status == status)
+        table = Table("id", "status", "audience", "words", "sources", "title")
+        for article in query.limit(limit):
+            table.add_row(
+                str(article.id),
+                article.status,
+                article.audience,
+                str(article.word_count),
+                str(len(article.sources)),
+                article.title[:70],
+            )
+        console.print(table)
+        console.print(f"markdown in {settings.care_articles_dir}")
+
+
+@care_app.command("export")
+def care_export_cmd(article_id: list[int] = typer.Option(None)) -> None:
+    """Write articles to markdown files (all review-ready ones by default)."""
+    init_db()
+    with session_scope() as session:
+        if article_id:
+            articles = [session.get(Article, aid) for aid in article_id]
+        else:
+            articles = list(session.query(Article).filter(Article.status == "ready_for_review"))
+        for path in care_export.run([a for a in articles if a is not None]):
+            console.print(str(path))
+
+
+@app.command("crawl")
+def crawl_cmd(url: list[str] = typer.Option(None), verbose: bool = False) -> None:
+    """Check robots, sitemap, indexability and metadata for the site's pages."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        table = Table("url", "http", "robots", "sitemap", "indexable", "issues")
+        for check in crawl.run(session, list(url) if url else None):
+            table.add_row(
+                check.url[:60],
+                str(check.status_code),
+                "ok" if check.robots_allowed else "BLOCKED",
+                "yes" if check.in_sitemap else "no",
+                "yes" if check.indexable else "NO",
+                "; ".join(check.issues)[:60],
+            )
+        console.print(table)
+
+
+@app.command("sync-traffic")
+def sync_traffic_cmd(days: int = typer.Option(None), verbose: bool = False) -> None:
+    """Pull page traffic for published articles from Plausible."""
+    _setup_logging(verbose)
+    init_db()
+    if not traffic.configured():
+        raise typer.BadParameter(
+            "XSWARM_PLAUSIBLE_API_KEY and XSWARM_PLAUSIBLE_SITE_ID are required"
+        )
+    with session_scope() as session:
+        snapshots = traffic.collect(session, days=days)
+        table = Table("url", "visitors", "views", "bounce", "avg s")
+        for snapshot in snapshots:
+            table.add_row(
+                snapshot.url[:60],
+                str(snapshot.visitors),
+                str(snapshot.pageviews),
+                f"{snapshot.bounce_rate:.0f}%",
+                f"{snapshot.avg_seconds:.0f}",
+            )
+        console.print(table)
+
+
+@app.command("dashboard")
+def dashboard_cmd(
+    days: int = typer.Option(None, help="Lookback window"),
+    json_out: str = typer.Option("", help="Also write the raw numbers as JSON here"),
+) -> None:
+    """Build the both-streams dashboard as a single HTML file."""
+    init_db()
+    with session_scope() as session:
+        report = dashboard.build(session, days=days)
+        table = Table("stream", "pieces", "ready", "published", "impressions", "eng rate", "cost")
+        for summary in report.streams:
+            table.add_row(
+                summary.stream,
+                str(summary.drafted),
+                f"{summary.ready} ({summary.pass_rate:.0%})",
+                str(summary.published),
+                f"{summary.impressions:,}",
+                f"{summary.engagement_rate:.2%}",
+                f"${summary.cost_usd:.2f}",
+            )
+        console.print(table)
+        path = dashboard.write(session, days=days)
+        console.print(f"[green]{path}[/green]")
+        if json_out:
+            Path(json_out).write_text(json.dumps(report.as_dict(), indent=2))
+            console.print(f"wrote {json_out}")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import memory
 from ..config import settings
 from ..llm import LLM, load_prompt
-from ..models import Candidate, Item
+from ..models import STREAM_ML, Candidate, Item
 from ..sources import normalize_title
 
 log = logging.getLogger(__name__)
@@ -110,9 +110,9 @@ def _keyword_relevance(item: Item) -> float:
 def _recent_titles(session: Session) -> list[str]:
     cutoff = dt.date.today() - dt.timedelta(days=settings.novelty_window_days)
     rows = session.execute(
-        select(Item.title).join(Candidate, Candidate.item_id == Item.id).where(
-            Candidate.run_date >= cutoff
-        )
+        select(Item.title)
+        .join(Candidate, Candidate.item_id == Item.id)
+        .where(Candidate.run_date >= cutoff, Candidate.stream == STREAM_ML)
     ).scalars()
     return [normalize_title(t) for t in rows]
 
@@ -134,13 +134,20 @@ def run(session: Session, llm: LLM, run_date: dt.date | None = None) -> list[Can
     covered = memory.covered_titles(session)
     already_scored = set(
         session.execute(
-            select(Candidate.item_id).where(Candidate.run_date == run_date)
+            select(Candidate.item_id).where(
+                Candidate.run_date == run_date, Candidate.stream == STREAM_ML
+            )
         ).scalars()
     )
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
     items = [
         item
-        for item in session.scalars(select(Item).order_by(Item.created_at.desc()).limit(400))
+        for item in session.scalars(
+            select(Item)
+            .where(Item.stream == STREAM_ML)
+            .order_by(Item.created_at.desc())
+            .limit(400)
+        )
         if item.id not in already_scored
         and (item.published_at is None or _as_utc(item.published_at) >= cutoff)
     ]
@@ -169,6 +176,7 @@ def run(session: Session, llm: LLM, run_date: dt.date | None = None) -> list[Can
     for total, subscores, rationale, item in scored[: settings.candidates_per_day]:
         candidate = Candidate(
             item_id=item.id,
+            stream=STREAM_ML,
             run_date=run_date,
             score=round(total, 4),
             subscores={k: round(v, 4) for k, v in subscores.items()},

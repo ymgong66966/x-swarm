@@ -112,6 +112,112 @@ class Settings(BaseSettings):
     # Pillars that may be scheduled without a human approving them first.
     autopublish_pillars: list[str] = Field(default=[])
 
+    # ------------------------------------------------------------------ care stream
+    # The company site is the only allowed source of product claims.
+    care_site_url: str = "https://alvernahealth.com"
+    care_site_paths: list[str] = Field(default=["/", "/providers", "/become-a-trainer"])
+    # Where articles are published, used for internal links, promo links and SEO checks.
+    care_blog_base_url: str = "https://alvernahealth.com/blog"
+    care_articles_dir: Path = REPO_ROOT / "content" / "articles"
+    care_articles_per_run: int = 2
+    care_candidates_per_run: int = 6
+    care_evidence_per_article: int = 6
+    care_min_words: int = 850
+    care_max_words: int = 1500
+    care_promos_per_article: int = 3
+
+    # Regulatory claims are only allowed to cite these hosts.
+    care_authoritative_hosts: list[str] = Field(
+        default=[
+            "cms.gov",
+            "medicare.gov",
+            "federalregister.gov",
+            "ecfr.gov",
+            "hhs.gov",
+            "medicaid.gov",
+            "congress.gov",
+            "gao.gov",
+            "nih.gov",
+            "ncbi.nlm.nih.gov",
+            "cdc.gov",
+        ]
+    )
+    # Discussion platforms: usable as motivation and sentiment, never as evidence.
+    care_signal_hosts: list[str] = Field(
+        default=["reddit.com", "linkedin.com", "quora.com", "facebook.com", "x.com"]
+    )
+    care_subreddits: list[str] = Field(
+        default=["CaregiverSupport", "dementia", "AgingParents", "HomeHealthcare"]
+    )
+    care_news_queries: list[str] = Field(
+        default=[
+            "Medicare caregiver training services",
+            "family caregiver policy",
+            "telehealth Medicare policy",
+            "hospital discharge caregiver readmission",
+            '"caregiver training" site:linkedin.com',
+        ]
+    )
+    care_policy_feeds: list[str] = Field(
+        default=[
+            "https://www.kff.org/feed/",
+            "https://homehealthcarenews.com/feed/",
+            "https://www.healthaffairs.org/action/showFeed?type=etoc&feed=rss&jc=hlthaff",
+        ]
+    )
+    care_research_queries: list[str] = Field(
+        default=[
+            "caregiver training intervention outcomes",
+            "telehealth caregiver education randomized",
+            "family caregiver burden readmission",
+        ]
+    )
+    care_source_max_age_days: int = 45
+    care_pillars: list[str] = Field(
+        default=[
+            "policy_explainer",
+            "reimbursement_mechanics",
+            "caregiver_skills",
+            "transitions_of_care",
+            "clinician_career",
+            "field_signal",
+        ]
+    )
+    care_audiences: list[str] = Field(default=["provider", "clinician", "caregiver"])
+    # Phrases that must never appear in care content, whatever the model decides.
+    # Matched on word boundaries, so "secure" and "procedure" are safe.
+    care_banned_phrases: list[str] = Field(
+        default=[
+            "guaranteed reimbursement",
+            "guaranteed payment",
+            "guaranteed coverage",
+            "always covered",
+            "always reimbursable",
+            "fully covered by medicare",
+            "cure",
+            "cures",
+            "risk-free",
+            "miracle",
+            "clinically proven",
+            "medically proven",
+            "best in class",
+            "revolutionary",
+            "life-changing",
+        ]
+    )
+    care_disclaimer: str = (
+        "This article is general information for education, not medical or billing advice. "
+        "Coverage, coding, and documentation requirements change; confirm current rules with "
+        "CMS and your payer, and route clinical questions to the treating clinician."
+    )
+
+    # Analytics for the blog side. Without a key the dashboard just omits traffic.
+    plausible_api_key: str | None = None
+    plausible_site_id: str | None = None
+    plausible_base_url: str = "https://plausible.io/api/v1"
+    dashboard_path: Path = REPO_ROOT / "dashboard.html"
+    dashboard_lookback_days: int = 30
+
     # Measurement / strategy
     metrics_lookback_days: int = 14
     strategy_min_posts: int = 8
