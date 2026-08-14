@@ -15,6 +15,7 @@ from .agents import (
     composer,
     curator,
     editor,
+    illustrator,
     measurer,
     publisher,
     scout,
@@ -30,6 +31,8 @@ from .config import settings
 from .db import init_db, session_scope
 from .evals import harness
 from .graph import run_pipeline
+from .ingest import fetch as ingest_fetch
+from .ingest import pipeline as ingest_pipeline
 from .llm import LLM
 from .models import (
     Article,
@@ -47,6 +50,8 @@ from .models import (
 app = typer.Typer(help="Agent swarm for an ML-frontier X account", no_args_is_help=True)
 care_app = typer.Typer(help="Care stream: healthcare articles and their promo posts")
 app.add_typer(care_app, name="care")
+ingest_app = typer.Typer(help="Your own material: a link, a paper, a post, or text")
+app.add_typer(ingest_app, name="ingest")
 console = Console()
 
 
@@ -179,6 +184,72 @@ def approve_cmd(draft_id: int, reject: bool = False, reason: str = "") -> None:
         console.print(f"draft {draft_id} -> [bold]{draft.status}[/bold]")
 
 
+@ingest_app.command("add")
+def ingest_add_cmd(
+    source: str = typer.Argument(
+        ..., help="A URL, an arXiv id, a path to a file, or the text itself"
+    ),
+    image: list[Path] = typer.Option(
+        None, help="Your own image(s) to attach instead of generating one"
+    ),
+    alt: str = typer.Option("", help="Alt text for images you supply"),
+    illustrate: bool = typer.Option(True, help="Generate a house-style image"),
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Turn your own material into an X thread, illustrated and edited, for review."""
+    _setup_logging(verbose)
+    init_db()
+    try:
+        for path in image or []:
+            ingest_pipeline.check_image(path)
+        material = ingest_fetch.load(source)
+    except ingest_fetch.IngestError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if not material.text.strip():
+        raise typer.BadParameter("nothing readable in that source")
+    llm = LLM(dry_run=dry_run)
+    with session_scope() as session:
+        draft = ingest_pipeline.run(
+            session,
+            material,
+            llm,
+            images=list(image or []),
+            alt=alt,
+            illustrate_it=illustrate,
+        )
+        spend = costs.record(session, llm)
+        console.print(f"[bold]{material.title}[/bold] ({material.kind})")
+        _print_drafts([draft])
+        console.print(f"draft {draft.id} is [bold]{draft.status}[/bold], ${spend:.3f}")
+
+
+@ingest_app.command("schedule")
+def ingest_schedule_cmd(
+    draft_id: int,
+    dry_run: bool = False,
+    schedule_only: bool = typer.Option(True, help="Queue in Typefully without auto-publishing"),
+) -> None:
+    """Schedule one approved ingest draft. Approve it first with `xswarm approve`."""
+    init_db()
+    with session_scope() as session:
+        draft = session.get(Draft, draft_id)
+        if draft is None:
+            raise typer.BadParameter(f"no draft {draft_id}")
+        if draft.status != "approved":
+            raise typer.BadParameter(
+                f"draft {draft_id} is {draft.status}; approve it before scheduling"
+            )
+        publication = ingest_pipeline.schedule(
+            session, draft, dry_run=dry_run, plan_only=schedule_only
+        )
+        when = publication.scheduled_for
+        console.print(
+            f"draft {draft_id} -> {publication.status} "
+            f"at {when.isoformat() if when else 'unscheduled'}"
+        )
+
+
 @app.command("render")
 def render_cmd(draft_id: list[int] = typer.Option(None), dry_run: bool = False) -> None:
     """Render (or re-render) the visual for specific drafts."""
@@ -188,6 +259,35 @@ def render_cmd(draft_id: list[int] = typer.Option(None), dry_run: bool = False) 
         assets = visualizer.run(session, LLM(dry_run=dry_run), [d for d in drafts if d])
         for asset in assets:
             console.print(f"{asset.kind}: {asset.path}")
+
+
+@app.command("illustrate")
+def illustrate_cmd(
+    draft_id: list[int] = typer.Option(None, help="Drafts to illustrate"),
+    style: str = typer.Option("", help=f"Force one of: {', '.join(settings.art_styles)}"),
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Generate a house-style image for specific drafts, in any stream."""
+    _setup_logging(verbose)
+    init_db()
+    if style and style not in settings.art_styles:
+        raise typer.BadParameter(f"unknown style {style!r}")
+    llm = LLM(dry_run=dry_run)
+    with session_scope() as session:
+        for did in draft_id or []:
+            draft = session.get(Draft, did)
+            if draft is None:
+                raise typer.BadParameter(f"no draft {did}")
+            if style:
+                draft.features = {**(draft.features or {}), "art_style": style}
+            asset = illustrator.illustrate(session, draft, llm)
+            if asset is None:
+                console.print(f"[yellow]draft {did}: no image provider[/yellow]")
+                continue
+            draft.features = {**(draft.features or {}), "visual_hint": asset.kind}
+            console.print(f"draft {did}: {asset.spec['style']} -> {asset.path}")
+        costs.record(session, llm)
 
 
 @app.command("publish")
@@ -206,9 +306,7 @@ def publish_cmd(
     if not settings.typefully_api_key and not dry_run:
         console.print("[yellow]XSWARM_TYPEFULLY_API_KEY unset — dry run[/yellow]")
     with session_scope() as session:
-        publications = publisher.run(
-            session, dry_run=dry_run, plan_only=schedule_only, limit=limit
-        )
+        publications = publisher.run(session, dry_run=dry_run, plan_only=schedule_only, limit=limit)
         table = Table("draft", "status", "scheduled_for", "provider id")
         for publication in publications:
             table.add_row(

@@ -17,6 +17,19 @@ log = logging.getLogger(__name__)
 URL_RE = re.compile(r"https?://\S+")
 HASHTAG_RE = re.compile(r"(?:^|\s)#\w+")
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?")
+# Spelled-out magnitudes, which slip past NUMBER_RE: "ninety percent", "three times faster".
+_WORD_NUMBERS = (
+    r"(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|"
+    r"seventy|eighty|ninety|hundred|thousand|million|billion|half|double|triple|quadruple)"
+)
+# A bare multiplier is still a quantity: "double the throughput" needs the same grounding.
+_BARE_MULTIPLIER = r"(?:doubles?|triples?|quadruples?|halves|halved)\s+(?:the|its|their|our)\b"
+WORD_NUMBER_RE = re.compile(
+    rf"\b{_WORD_NUMBERS}(?:[- ]{_WORD_NUMBERS})*[- ]?"
+    r"(?:percent|percentage points?|x|times|fold|orders?[- ]of[- ]magnitude)\b"
+    rf"|\b{_BARE_MULTIPLIER}",
+    re.IGNORECASE,
+)
 # First-person experience the account has not actually had. The voice is opinionated,
 # which makes it easy for the Writer to slide from "the paper reports" into "I ran it".
 _FIRSTHAND_VERBS = (
@@ -53,9 +66,7 @@ def _grounding_text(draft: Draft, brief: Brief | None) -> str:
     )
 
 
-def deterministic_checks(
-    draft: Draft, brief: Brief | None, recent_bodies: list[str]
-) -> list[str]:
+def deterministic_checks(draft: Draft, brief: Brief | None, recent_bodies: list[str]) -> list[str]:
     """Everything that can be decided without a model. Cheap, and it catches the
     failure modes that actually kill a technical account."""
     body = draft.body
@@ -92,6 +103,9 @@ def deterministic_checks(
         for number in set(NUMBER_RE.findall(post)):
             if number not in grounding:
                 notes.append(f"number {number!r} in {label} is not present in the brief")
+        for phrase in set(WORD_NUMBER_RE.findall(post)):
+            if phrase.lower() not in grounding.lower():
+                notes.append(f"number {phrase!r} in {label} is not present in the brief")
 
     lowered = body.lower()
     for claim in (brief.unverified_claims if brief else []) or []:

@@ -19,6 +19,7 @@ from ..config import settings
 from ..models import (
     STREAM_CARE,
     STREAM_ML,
+    STREAM_OWN,
     Article,
     CrawlCheck,
     Draft,
@@ -30,8 +31,19 @@ from ..models import (
 
 log = logging.getLogger(__name__)
 
-ML_AGENTS = {"curator", "analyst", "writer", "composer", "editor", "visualizer", "strategist"}
-CARE_AGENTS = {"care_angle", "care_writer", "care_promoter"}
+ML_AGENTS = {
+    "curator",
+    "analyst",
+    "writer",
+    "composer",
+    "editor",
+    "visualizer",
+    "illustrator_ml",
+    "strategist",
+}
+CARE_AGENTS = {"care_angle", "care_writer", "care_promoter", "illustrator_care"}
+OWN_AGENTS = {"ingest_writer", "illustrator_own"}
+STREAM_AGENTS = {STREAM_ML: ML_AGENTS, STREAM_CARE: CARE_AGENTS, STREAM_OWN: OWN_AGENTS}
 
 
 @dataclass(slots=True)
@@ -146,7 +158,7 @@ def _stream_summary(session: Session, stream: str, since: dt.date) -> StreamSumm
             summary.engagements += _engagements(metric)
             summary.link_clicks += metric.link_clicks
 
-    agents = CARE_AGENTS if stream == STREAM_CARE else ML_AGENTS
+    agents = STREAM_AGENTS.get(stream, ML_AGENTS)
     summary.cost_usd = sum(
         call.cost_usd
         for call in session.scalars(select(ModelCall).where(ModelCall.run_date >= since))
@@ -231,7 +243,7 @@ def build(session: Session, *, days: int | None = None) -> Dashboard:
     return Dashboard(
         generated_at=dt.datetime.now(dt.timezone.utc),
         since=since,
-        streams=[_stream_summary(session, s, since) for s in (STREAM_ML, STREAM_CARE)],
+        streams=[_stream_summary(session, s, since) for s in (STREAM_ML, STREAM_CARE, STREAM_OWN)],
         articles=_article_rows(session, since),
         posts=_post_rows(session, since),
         crawl=_crawl_rows(session),
