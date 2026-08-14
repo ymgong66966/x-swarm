@@ -241,6 +241,8 @@ class Article(Base):
     status: Mapped[str] = mapped_column(String(20), default="drafted", index=True)
     editor_notes: Mapped[list[str]] = mapped_column(default=list)
     published_url: Mapped[str | None] = mapped_column(Text)
+    # The pull request on the site repo. Set when we open it, before anything is live.
+    site_pr_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     promos: Mapped[list[Draft]] = relationship(back_populates="article")

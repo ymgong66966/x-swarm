@@ -56,9 +56,32 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm care run` | Care stream end to end: research → curate → plan → article → compliance → promos |
 | `xswarm care sync-site` | Re-read alvernahealth.com into the product-fact table |
 | `xswarm care articles` / `care export` | List articles / write them to `content/articles/*.md` |
+| `xswarm care approve 12` | Human gate: mark a reviewed article approved (or `--reject --reason ...`) |
+| `xswarm care publish 12 --hero art.png` | Branch + PR the approved article into the Alverna site repo |
+| `xswarm care promote 12` | Only once the article URL returns 200: release its promo drafts |
 | `xswarm crawl` | Robots, sitemap, indexability, title/meta/canonical per URL |
 | `xswarm sync-traffic` | Pull article traffic from Plausible |
 | `xswarm dashboard` | Both streams side by side, written to `dashboard.html` |
+
+## Publishing an article
+
+The site repo is the publication gate — nothing goes live without a human merge.
+
+```
+care run ─► review ─► care approve ─► care publish ─► PR on alverna-site
+                                                          │
+                              you merge ──► Lovable redeploys ──► /resources/<slug> live
+                                                          │
+                                     care promote ─► URL must return 200 ─► promos approved
+                                                          │
+                                                    xswarm publish ─► Typefully schedules them
+```
+
+`care publish` refuses anything that is not `approved`, renders the article in the site's
+front-matter dialect into `content/resources/<date>-<slug>.md`, copies `--hero` to
+`public/resources/media/<slug>.<ext>`, pushes a branch, and opens the PR when
+`XSWARM_GITHUB_TOKEN` is set (otherwise it prints the compare URL for you to open).
+`--dry-run` renders the file and touches no git.
 
 ## Care stream
 

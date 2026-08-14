@@ -24,6 +24,7 @@ from .agents import (
 )
 from .analytics import crawl, dashboard, traffic
 from .care import export as care_export
+from .care import publish as care_publish
 from .care import site as care_site
 from .care.graph import run_pipeline as run_care_pipeline
 from .config import settings
@@ -415,6 +416,86 @@ def care_export_cmd(article_id: list[int] = typer.Option(None)) -> None:
             articles = list(session.query(Article).filter(Article.status == "ready_for_review"))
         for path in care_export.run([a for a in articles if a is not None]):
             console.print(str(path))
+
+
+@care_app.command("approve")
+def care_approve_cmd(article_id: int, reject: bool = False, reason: str = "") -> None:
+    """Clear an article for publication (or reject it). Publishing requires this."""
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        if not reject and article.status not in {care_publish.STATUS_READY, "approved"}:
+            raise typer.BadParameter(
+                f"article {article_id} is '{article.status}'; only articles that cleared "
+                "the compliance editor can be approved"
+            )
+        article.status = "rejected" if reject else care_publish.STATUS_APPROVED
+        if reason:
+            article.editor_notes = [*article.editor_notes, f"human: {reason}"]
+        console.print(f"article {article_id} -> [bold]{article.status}[/bold]")
+
+
+@care_app.command("publish")
+def care_publish_cmd(
+    article_id: int,
+    hero: str = typer.Option("", help="Image file to ship as the article's hero"),
+    hero_alt: str = typer.Option("", help="Alt text for the hero image"),
+    dry_run: bool = typer.Option(False, help="Render the file and stop; touch no git"),
+    verbose: bool = False,
+) -> None:
+    """Open a pull request on the site repo for an approved article. Merging publishes it."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        try:
+            result = care_publish.publish(
+                article,
+                hero_path=Path(hero) if hero else None,
+                hero_alt=hero_alt,
+                dry_run=dry_run,
+            )
+        except care_publish.PublishError as error:
+            console.print(f"[red]{error}[/red]")
+            raise typer.Exit(1) from None
+
+        if dry_run:
+            console.print(f"[yellow]dry run[/yellow] {result.content_path}")
+            console.print(result.markdown[:1200])
+            return
+        article.site_pr_url = result.pr_url or result.compare_url
+        console.print(f"branch [bold]{result.branch}[/bold] -> {result.content_path}")
+        console.print(result.pr_url or f"open the PR: {result.compare_url}")
+        console.print(f"lands at {result.article_url} once merged")
+
+
+@care_app.command("promote")
+def care_promote_cmd(article_id: int, verbose: bool = False) -> None:
+    """Release an article's promo posts — only once its URL actually resolves."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        url = care_publish.article_url(article)
+        live, status = care_publish.is_live(url)
+        if not live:
+            console.print(
+                f"[red]{url} returned {status or 'no response'}[/red] — merge the site PR "
+                "first; promos must never link to a 404"
+            )
+            raise typer.Exit(1)
+        article.published_url = url
+        article.status = "published"
+        promos = [d for d in article.promos if d.status == "ready_for_review"]
+        for draft in promos:
+            draft.status = "approved"
+        console.print(f"{url} is live; approved {len(promos)} promo posts for scheduling")
 
 
 @app.command("crawl")
