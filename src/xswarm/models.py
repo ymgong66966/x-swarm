@@ -3,8 +3,23 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# Which content operation a row belongs to. Kept as a plain column rather than separate
+# tables so the dashboard can compare the two streams with one query.
+STREAM_ML = "ml"
+STREAM_CARE = "care"
 
 
 def utcnow() -> dt.datetime:
@@ -23,6 +38,7 @@ class Item(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    stream: Mapped[str] = mapped_column(String(8), default=STREAM_ML, index=True)
     source: Mapped[str] = mapped_column(String(32), index=True)
     external_id: Mapped[str | None] = mapped_column(String(128))
     url: Mapped[str] = mapped_column(Text)
@@ -43,6 +59,7 @@ class Candidate(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), index=True)
+    stream: Mapped[str] = mapped_column(String(8), default=STREAM_ML, index=True)
     run_date: Mapped[dt.date] = mapped_column(index=True)
     score: Mapped[float] = mapped_column(Float)
     subscores: Mapped[dict[str, Any]] = mapped_column(default=dict)
@@ -80,12 +97,15 @@ class Draft(Base):
 
     `brief_id` is nullable because a weekly roundup is about the week, not about one
     item; those drafts carry their grounding in `features["grounding"]` instead.
+    Care-stream promo posts hang off `article_id` instead of a brief.
     """
 
     __tablename__ = "drafts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     brief_id: Mapped[int | None] = mapped_column(ForeignKey("briefs.id"), index=True)
+    article_id: Mapped[int | None] = mapped_column(ForeignKey("articles.id"), index=True)
+    stream: Mapped[str] = mapped_column(String(8), default=STREAM_ML, index=True)
     variant: Mapped[int] = mapped_column(Integer, default=0)
     body: Mapped[str] = mapped_column(Text)
     # Posts 2..n of a thread. The link reply is always appended after these.
@@ -98,6 +118,7 @@ class Draft(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     brief: Mapped[Brief | None] = relationship(back_populates="drafts")
+    article: Mapped[Article | None] = relationship(back_populates="promos")
     assets: Mapped[list[Asset]] = relationship(back_populates="draft")
     publication: Mapped[Publication | None] = relationship(back_populates="draft", uselist=False)
 
@@ -176,3 +197,94 @@ class PostMetric(Base):
     profile_clicks: Mapped[int] = mapped_column(Integer, default=0)
 
     publication: Mapped[Publication] = relationship(back_populates="metrics")
+
+
+class SiteFact(Base):
+    """A statement lifted verbatim from the company's own website.
+
+    The care writer may assert product facts only from this table, so a marketing copy
+    change on the site propagates to the articles instead of living in a prompt."""
+
+    __tablename__ = "site_facts"
+    __table_args__ = (UniqueConstraint("fingerprint", name="uq_site_facts_fingerprint"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    url: Mapped[str] = mapped_column(Text)
+    section: Mapped[str] = mapped_column(Text, default="")
+    text: Mapped[str] = mapped_column(Text)
+    audience: Mapped[str] = mapped_column(String(16), default="all", index=True)
+    fetched_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Article(Base):
+    """A long-form care-stream piece: one thesis, argued, with every claim sourced."""
+
+    __tablename__ = "articles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_date: Mapped[dt.date] = mapped_column(index=True)
+    pillar: Mapped[str] = mapped_column(String(32), index=True)
+    audience: Mapped[str] = mapped_column(String(16), index=True)
+    thesis: Mapped[str] = mapped_column(Text, default="")
+    title: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(String(160), index=True)
+    dek: Mapped[str] = mapped_column(Text, default="")
+    meta_description: Mapped[str] = mapped_column(Text, default="")
+    keywords: Mapped[list[str]] = mapped_column(default=list)
+    outline: Mapped[list[str]] = mapped_column(default=list)
+    body_md: Mapped[str] = mapped_column(Text, default="")
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    # [{"url": ..., "title": ..., "publisher": ..., "kind": "regulatory|research|press|signal"}]
+    sources: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list)
+    evidence: Mapped[list[str]] = mapped_column(default=list)
+    status: Mapped[str] = mapped_column(String(20), default="drafted", index=True)
+    editor_notes: Mapped[list[str]] = mapped_column(default=list)
+    published_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    promos: Mapped[list[Draft]] = relationship(back_populates="article")
+
+
+class TrafficSnapshot(Base):
+    """Web analytics for one URL over one window, from whichever provider is configured.
+
+    Stored provider-agnostically so Plausible today and GA4 later land in the same rows."""
+
+    __tablename__ = "traffic_snapshots"
+    __table_args__ = (
+        UniqueConstraint("url", "period_start", "period_end", name="uq_traffic_window"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(Text, index=True)
+    stream: Mapped[str] = mapped_column(String(8), default=STREAM_CARE, index=True)
+    provider: Mapped[str] = mapped_column(String(24), default="plausible")
+    period_start: Mapped[dt.date] = mapped_column(index=True)
+    period_end: Mapped[dt.date] = mapped_column(index=True)
+    visitors: Mapped[int] = mapped_column(Integer, default=0)
+    pageviews: Mapped[int] = mapped_column(Integer, default=0)
+    bounce_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    referrers: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    captured_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CrawlCheck(Base):
+    """One technical-SEO reading of a URL: can a crawler reach it, and what does it see."""
+
+    __tablename__ = "crawl_checks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(Text, index=True)
+    stream: Mapped[str] = mapped_column(String(8), default=STREAM_CARE, index=True)
+    checked_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    status_code: Mapped[int] = mapped_column(Integer, default=0)
+    robots_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    in_sitemap: Mapped[bool] = mapped_column(Boolean, default=False)
+    indexable: Mapped[bool] = mapped_column(Boolean, default=True)
+    title: Mapped[str] = mapped_column(Text, default="")
+    meta_description: Mapped[str] = mapped_column(Text, default="")
+    canonical: Mapped[str] = mapped_column(Text, default="")
+    issues: Mapped[list[str]] = mapped_column(default=list)
+    response_ms: Mapped[float] = mapped_column(Float, default=0.0)

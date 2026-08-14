@@ -1,7 +1,10 @@
 # x-swarm
 
-Agent swarm that reads the ML frontier every day, forms grounded takes, draws the visual,
-queues the post, and learns from what performed. All nine agents are implemented.
+Two content pipelines that share one machine room. The **ML stream** reads the research
+frontier every day, forms grounded takes, draws the visual and queues the post. The **care
+stream** researches caregiving policy and practice, writes long-form articles for
+alvernahealth.com, and repurposes each one into X and LinkedIn posts. Both land in the same
+drafts table, the same publisher, and one dashboard — see `docs/two-streams.md`.
 
 ```
 Scout ─► Curator ─► Analyst ─► Writer ─► Editor ─► Visualizer ─► [review] ─► Publisher
@@ -50,6 +53,28 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm stats` | Row counts |
 | `xswarm cost` | Model spend per agent, month to date, projected against the budget |
 | `xswarm eval` | Score draft quality offline against frozen briefs |
+| `xswarm care run` | Care stream end to end: research → curate → plan → article → compliance → promos |
+| `xswarm care sync-site` | Re-read alvernahealth.com into the product-fact table |
+| `xswarm care articles` / `care export` | List articles / write them to `content/articles/*.md` |
+| `xswarm crawl` | Robots, sitemap, indexability, title/meta/canonical per URL |
+| `xswarm sync-traffic` | Pull article traffic from Plausible |
+| `xswarm dashboard` | Both streams side by side, written to `dashboard.html` |
+
+## Care stream
+
+```
+site sync ─► Scout ─► Curator ─► Angle ─► Article writer ─► Compliance editor ─► Promoter
+(product     policy,   authority,  one      850-1500 words     blocks unsourced    3 X posts
+ facts,      research, subject,    thesis,  with inline        billing claims,     + LinkedIn,
+ robots-     press,    freshness   one      citations and      promises, clinical  linked to
+ aware)      forums                audience disclaimer         direction, PHI      the article
+```
+
+Every source carries an `evidence_kind`. Only `regulatory` (CMS, Federal Register, eCFR,
+Medicare.gov) and `research` (PubMed) can support a factual claim; Reddit and LinkedIn are
+`signal` — they can motivate a piece and be described as sentiment, never cited as fact. The
+compliance editor enforces that deterministically, so an article that states a code or a
+coverage rule without a government citation cannot reach review.
 
 ## Sources
 

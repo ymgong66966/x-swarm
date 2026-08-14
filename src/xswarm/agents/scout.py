@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Item
+from ..models import STREAM_ML, Item
 from ..sources import RawItem, arxiv, github, hf_papers, newsletters, semantic_scholar
 
 log = logging.getLogger(__name__)
 
-SOURCES = {
+Fetcher = Callable[[], list[RawItem]]
+
+SOURCES: dict[str, Fetcher] = {
     "arxiv": arxiv.fetch,
     "hf_daily": hf_papers.fetch,
     "newsletters": newsletters.fetch,
@@ -18,10 +21,10 @@ SOURCES = {
 }
 
 
-def collect(only: list[str] | None = None) -> list[RawItem]:
+def gather(fetchers: dict[str, Fetcher], only: list[str] | None = None) -> list[RawItem]:
     """Fetch from every source. One source failing must never lose the others' results."""
     raw: list[RawItem] = []
-    for name, fetcher in SOURCES.items():
+    for name, fetcher in fetchers.items():
         if only and name not in only:
             continue
         try:
@@ -31,7 +34,11 @@ def collect(only: list[str] | None = None) -> list[RawItem]:
             continue
         log.info("source %s returned %d items", name, len(found))
         raw.extend(found)
-    return _enrich(_merge(raw))
+    return _merge(raw)
+
+
+def collect(only: list[str] | None = None) -> list[RawItem]:
+    return _enrich(gather(SOURCES, only=only))
 
 
 def _merge(raw: list[RawItem]) -> list[RawItem]:
@@ -73,7 +80,7 @@ def _enrich(items: list[RawItem]) -> list[RawItem]:
     return items
 
 
-def persist(session: Session, raw: list[RawItem]) -> list[Item]:
+def persist(session: Session, raw: list[RawItem], stream: str = STREAM_ML) -> list[Item]:
     """Insert new items; refresh signals on ones we have already seen."""
     fingerprints = [i.fingerprint for i in raw]
     known = {
@@ -86,6 +93,7 @@ def persist(session: Session, raw: list[RawItem]) -> list[Item]:
         if item is None:
             item = Item(
                 fingerprint=candidate.fingerprint,
+                stream=stream,
                 source=candidate.source,
                 external_id=candidate.external_id,
                 url=candidate.url,
