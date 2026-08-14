@@ -100,8 +100,7 @@ wording rather than the model's first draft.
 `care watch` is the same two steps for every pending article at once, with nothing to type per
 article: it syncs each one's edits (from the PR branch, or from `main` once the branch is
 deleted by the merge) and promotes the ones that are already live. The `care-watch` workflow
-(`ci/workflows/care-watch.yml`, to be moved into `.github/workflows/` by hand — my token cannot
-write workflow files) runs it hourly and on a `repository_dispatch: article-merged` that alverna-site sends when a
+runs it hourly and on a `repository_dispatch: article-merged` that alverna-site sends when a
 merge to its `main` touches `content/resources/**`, so after you merge the PR the rest of the
 loop happens without anyone at a terminal. It needs `XSWARM_DATABASE_URL` to point at the same
 (Postgres) database the runs write to — the state cannot live in a local SQLite file if a
