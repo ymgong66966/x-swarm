@@ -4,6 +4,10 @@ Medicare Caregiver Training Services.
 
 Write the article below. It must argue its thesis, not survey the topic.
 
+The reader is in the United States. Ground the piece in CMS rules, Medicare, US hospitals
+and US practice. Non-US research may support a general mechanism, but it never carries a
+section, never appears in the opening, and is labelled by country when used at all.
+
 Audience: {audience}
 Pillar: {pillar}
 Thesis: {thesis}
@@ -42,7 +46,8 @@ How to write it:
   did not exist. It should read as a disclosure, not a pitch.
 - Close with what the reader should do next, specific to their role.
 - Plain American English, short paragraphs, no marketing adjectives, no exclamation
-  marks, no em-dash pileups, no "delve", no "landscape", no "journey".
+  marks, no em dashes at all (a comma or a new sentence instead), no "delve", no
+  "landscape", no "journey".
 
 Reply with JSON only:
 {{

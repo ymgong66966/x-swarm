@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import STREAM_CARE, Article, Asset, Draft
-from .editor import CLINICAL_DIRECTIVE_RE, banned_phrase_hits, promises_outcome
+from .editor import CLINICAL_DIRECTIVE_RE, NON_US_RE, banned_phrase_hits, promises_outcome
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,13 @@ CTA_RE = re.compile(
 # A hook only works if the eye can find it. Everything the model produced before this
 # check arrived as one unbroken block, which is the shape of a press release.
 DENSE_CHARS = 150
+# A hook with a single line under it is a post nobody stops for. There is room for the
+# substance that earns the click, so the post is expected to use most of it.
+MIN_POST_CHARS = 190
+MIN_LINKEDIN_CHARS = 400
+# The em dash is the most recognisable tell of generated prose. A person writing on a
+# phone types a comma, or starts a new sentence.
+DASH_RE = re.compile(r" *(?:[—–]|(?<= )--(?= )) *")
 MARKETING_TELLS = (
     "unlock",
     "empower",
@@ -172,10 +179,13 @@ def _clean(body: str) -> str:
     """Tidy whitespace without flattening the post.
 
     Line breaks are load-bearing: a hook line followed by the substance reads like a
-    person, the same words run into one paragraph read like a press release.
+    person, the same words run into one paragraph read like a press release. Em dashes
+    are removed for the opposite reason: nothing else marks a post as machine-written
+    as reliably, and a comma carries the same clause.
     """
     for token in BANNED_SOCIAL:
         body = body.replace(token, "")
+    body = DASH_RE.sub(", ", body)
     body = re.sub(r"[ \t]+", " ", body)
     body = re.sub(r" *\n *", "\n", body)
     return re.sub(r"\n{3,}", "\n\n", body).strip()
@@ -195,6 +205,18 @@ def _break_hook(body: str) -> str:
     return f"{match.group(1)}\n\n{body[match.start(2) :]}"
 
 
+def _us_first(claims: list[str]) -> list[str]:
+    """Order the facts the model may use so US evidence is the material it reaches for.
+
+    The scout still collects non-US research (a caregiver-burden effect is a caregiver-
+    burden effect), but the reader is a US clinician or family dealing with Medicare, so
+    a foreign cohort is the fact of last resort rather than the headline.
+    """
+    domestic = [claim for claim in claims if not NON_US_RE.search(claim)]
+    foreign = [claim for claim in claims if NON_US_RE.search(claim)]
+    return domestic + foreign
+
+
 def _fallback_posts(article: Article) -> list[tuple[str, str]]:
     """Without a model the thesis is still a true, sourced sentence, so it can carry one
     post. Anything more would be invention."""
@@ -209,9 +231,11 @@ def write(article: Article, llm: LLM) -> list[Draft]:
             title=article.title,
             thesis=article.thesis,
             takeaways="\n".join(f"- {line}" for line in takeaways) or f"- {article.thesis}",
-            evidence="\n".join(f"- {claim}" for claim in article.evidence[:10]) or "- (none)",
+            evidence="\n".join(f"- {claim}" for claim in _us_first(article.evidence)[:10])
+            or "- (none)",
             variants=settings.care_promos_per_article,
             max_chars=settings.max_post_chars,
+            min_chars=MIN_POST_CHARS,
         ),
         strong=True,
         max_tokens=1200,
@@ -344,11 +368,15 @@ def check(draft: Draft) -> list[str]:
     shapes are cheap to detect, so the model does not get to ship them.
     """
     notes: list[str] = []
-    limit = 900 if draft.features.get("channel") == "linkedin" else settings.max_post_chars
+    linkedin = draft.features.get("channel") == "linkedin"
+    limit = 900 if linkedin else settings.max_post_chars
+    floor = MIN_LINKEDIN_CHARS if linkedin else MIN_POST_CHARS
     if not draft.body.strip():
         notes.append("empty post")
     if len(draft.body) > limit:
         notes.append(f"{len(draft.body)} chars over the {limit} limit")
+    elif draft.body.strip() and len(draft.body) < floor:
+        notes.append(f"{len(draft.body)} chars: a hook with nothing under it, aim for {floor}+")
     for phrase in banned_phrase_hits(draft.body):
         notes.append(f"banned phrase: {phrase!r}")
     if promises_outcome(draft.body):
@@ -361,6 +389,11 @@ def check(draft: Draft) -> list[str]:
         notes.append("one dense block; the hook needs its own line")
     if CTA_RE.search(draft.body):
         notes.append("ends on a call to action; the link already does that")
+    if DASH_RE.search(draft.body):
+        notes.append("em dash: the clearest tell of generated prose")
+    foreign = NON_US_RE.search(draft.body)
+    if foreign:
+        notes.append(f"leads on non-US evidence: {foreign.group(0)!r}")
     for phrase in MARKETING_TELLS:
         if phrase in draft.body.lower():
             notes.append(f"marketing filler: {phrase!r}")

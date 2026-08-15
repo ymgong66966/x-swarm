@@ -78,6 +78,56 @@ HEDGE_RE = re.compile(
     r"\b(?:may|might|can|could|if|when|where|subject to|typically|generally|often|depends)\b",
     re.IGNORECASE,
 )
+# Alverna sells into the United States: Medicare, CMS rules, US hospitals and clinicians.
+# A post that opens on a Taiwanese cohort reads like a literature review, and it is
+# evidence about a health system the reader does not work in.
+NON_US_MARKERS = (
+    "taiwan",
+    "taiwanese",
+    "china",
+    "chinese",
+    "japan",
+    "japanese",
+    "korea",
+    "korean",
+    "singapore",
+    "india",
+    "iran",
+    "israel",
+    "turkey",
+    "brazil",
+    "mexico",
+    "canada",
+    "canadian",
+    "australia",
+    "australian",
+    "new zealand",
+    "united kingdom",
+    "britain",
+    "british",
+    "nhs",
+    "ireland",
+    "europe",
+    "european",
+    "germany",
+    "german",
+    "france",
+    "french",
+    "spain",
+    "spanish",
+    "italy",
+    "italian",
+    "netherlands",
+    "dutch",
+    "sweden",
+    "swedish",
+    "norway",
+    "denmark",
+    "danish",
+    "finland",
+)
+# Word boundaries matter: "Indiana" is a US state and "India" is not the same word.
+NON_US_RE = re.compile(rf"\b(?:{'|'.join(NON_US_MARKERS)})\b", re.IGNORECASE)
 PAYER_RE = re.compile(
     r"\b(?:medicare|medicaid|payer|payor|insurer|insurance|plan)\b", re.IGNORECASE
 )

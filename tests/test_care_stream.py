@@ -24,6 +24,42 @@ from xswarm.models import (
 
 TODAY = dt.date.today()
 
+# Posts long enough to clear the length floor: a hook with one line under it is the
+# shape the checks now reject, so a stub that short would test nothing real.
+LONG_HOOK = (
+    "Who taught the caregiver?\n\n"
+    "Usually nobody. The discharge summary lists the medications and the follow-up, and "
+    "it assumes somebody at home already knows how to do the transfers.\n\n"
+    "Training tied to the treatment plan may be billable when a clinician runs it."
+)
+LONG_HANDOVER = (
+    "Discharge day is not a teaching moment.\n\n"
+    "It is a handover, and the person receiving it has been awake since five with a "
+    "folder in one hand and no idea what a safe transfer looks like.\n\n"
+    "Plan-tied caregiver training exists to close exactly that gap."
+)
+LONG_LINKEDIN = (
+    "Discharge planning quietly assumes someone at home was trained.\n\n"
+    "Most of the time nobody was. The summary goes out, the follow-up is scheduled, and "
+    "the person who will actually do the transfers, the medications and the overnight "
+    "watching has been shown none of it.\n\n"
+    "Caregiver training that is tied to the patient's treatment plan and delivered by a "
+    "clinician may be billable, and the documentation is where teams lose it: the note "
+    "has to name the goal in the plan that the session served."
+)
+STUB_CODES = (
+    "Medicare added caregiver training codes and most discharges still ignore them.\n\n"
+    "The sessions may be billable when the note ties them to the patient's own goals, "
+    "and almost nobody has changed the discharge workflow to use them.\n\n"
+    "The gap is documentation, not willingness."
+)
+STUB_ASSUMES = (
+    "Discharge plans assume a trained caregiver.\n\n"
+    "Usually there isn't one. The plan lands on a spouse who watched a transfer once, "
+    "on the way out of the building.\n\n"
+    "Training tied to that plan may be billable when a clinician runs the session."
+)
+
 
 def make_item(session: Session, **kwargs) -> Item:
     defaults = {
@@ -256,7 +292,9 @@ def test_promo_check_blocks_promises_without_an_auxiliary_verb(body: str) -> Non
 
 def test_promo_check_allows_hedged_copy() -> None:
     draft = Draft(
-        body="Caregiver training may be billable when it is tied to the treatment plan.",
+        body="Who taught the caregiver?\n\nCaregiver training may be billable when it is "
+        "tied to the treatment plan and a clinician runs the session. The documentation "
+        "is the part teams miss: the note has to name the patient goal it serves.",
         features={"channel": "x"},
         variant=0,
     )
@@ -283,12 +321,59 @@ def test_promo_check_blocks_a_call_to_action_and_marketing_filler() -> None:
 def test_promo_check_allows_a_hook_and_keeps_its_line_breaks() -> None:
     draft = Draft(
         body="Who taught the caregiver?\n\nNobody, usually. Training may be billable when "
-        "it is tied to the treatment plan.",
+        "it is tied to the treatment plan, and the session has to be run by a clinician.\n\n"
+        "That single requirement is why most discharge teams never bill for it at all.",
         features={"channel": "x"},
         variant=0,
     )
     assert promoter.check(draft) == []
     assert "\n" in promoter._clean(draft.body)
+
+
+def test_promo_check_blocks_a_hook_with_nothing_under_it() -> None:
+    """A one-line post reads as a teaser for the link, which is the thing we are not doing."""
+    thin = Draft(
+        body="Who taught the caregiver?\n\nUsually nobody.",
+        features={"channel": "x"},
+        variant=0,
+    )
+    assert any("nothing under it" in note for note in promoter.check(thin))
+
+
+def test_em_dashes_are_removed_and_flagged() -> None:
+    assert "—" not in promoter._clean("Training is billable — when a clinician runs it.")
+    dashed = Draft(
+        body=LONG_HOOK.replace("Usually nobody.", "Usually nobody — not one person."),
+        features={"channel": "x"},
+        variant=0,
+    )
+    assert any("em dash" in note for note in promoter.check(dashed))
+
+
+def test_non_us_evidence_is_pushed_down_and_flagged() -> None:
+    """Alverna sells into Medicare; a Taiwanese cohort is the wrong thing to lead with."""
+    foreign = Draft(
+        body=LONG_HOOK.replace("Usually nobody.", "A study in Taiwan found the same thing."),
+        features={"channel": "x"},
+        variant=0,
+    )
+    assert any("non-US" in note for note in promoter.check(foreign))
+    assert promoter.check(Draft(body=LONG_HOOK, features={"channel": "x"}, variant=0)) == []
+    ordered = promoter._us_first(
+        ["A Taiwanese cohort study of caregiver burden", "CMS pays for 97550 in CY2025"]
+    )
+    assert ordered[0].startswith("CMS")
+
+
+def test_the_curator_prefers_the_market_we_publish_into(session: Session) -> None:
+    domestic = make_item(session, external_id="us", title="CMS caregiver training under Medicare")
+    foreign = make_item(
+        session,
+        external_id="tw",
+        title="Caregiver training under Medicare in Taiwan",
+        url="https://pubmed.ncbi.nlm.nih.gov/1/",
+    )
+    assert curator.score_us_fit(domestic) > curator.score_us_fit(foreign)
 
 
 def test_a_one_paragraph_post_gets_its_hook_onto_its_own_line() -> None:
@@ -320,7 +405,7 @@ def test_a_promo_that_breaks_the_voice_rules_is_generated_again(session: Session
                     "linkedin": "",
                 }
             return {
-                "x_posts": [{"body": "Who taught the caregiver?\n\nUsually nobody."}],
+                "x_posts": [{"body": LONG_HOOK}],
                 "linkedin": "",
             }
 
@@ -345,11 +430,8 @@ def test_rewriting_promos_keeps_the_rows_that_own_a_queue_slot(session: Session)
     class _NewVoice(_StubLLM):
         def complete_json(self, prompt: str, **kwargs) -> dict:
             return {
-                "x_posts": [
-                    {"body": "Who taught the caregiver?\n\nUsually nobody."},
-                    {"body": "Discharge day is not a teaching moment.\n\nIt is a handover."},
-                ],
-                "linkedin": "Discharge quietly assumes someone at home was trained.",
+                "x_posts": [{"body": LONG_HOOK}, {"body": LONG_HANDOVER}],
+                "linkedin": LONG_LINKEDIN,
             }
 
     changed = promoter.rewrite(session, article, _NewVoice())
@@ -411,9 +493,6 @@ class _StubLLM:
 
     def complete_json(self, prompt: str, **kwargs) -> dict:
         return {
-            "x_posts": [
-                {"body": "Medicare added caregiver training codes; most discharges ignore them."},
-                {"body": "Discharge plans assume a trained caregiver. Usually there isn't one."},
-            ],
-            "linkedin": "Discharge planning quietly assumes someone at home was trained.",
+            "x_posts": [{"body": STUB_CODES}, {"body": STUB_ASSUMES}],
+            "linkedin": LONG_LINKEDIN,
         }
