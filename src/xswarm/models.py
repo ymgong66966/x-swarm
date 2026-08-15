@@ -113,6 +113,9 @@ class Draft(Base):
     # Posts 2..n of a thread. The link reply is always appended after these.
     thread: Mapped[list[str]] = mapped_column(default=list)
     link_reply: Mapped[str] = mapped_column(Text, default="")
+    # A link put in the post itself so the platform renders its preview card. Kept apart
+    # from `body` because it costs a fixed 23 characters on X whatever its length.
+    card_url: Mapped[str] = mapped_column(Text, default="")
     alt_text: Mapped[str] = mapped_column(Text, default="")
     features: Mapped[dict[str, Any]] = mapped_column(default=dict)
     status: Mapped[str] = mapped_column(String(16), default="drafted", index=True)

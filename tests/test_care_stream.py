@@ -7,6 +7,7 @@ import datetime as dt
 import pytest
 from sqlalchemy.orm import Session
 
+from xswarm.agents import publisher
 from xswarm.analytics import dashboard
 from xswarm.care import curator, export, promoter, scorecard, writer
 from xswarm.care.angle import Evidence, Plan
@@ -28,13 +29,13 @@ TODAY = dt.date.today()
 # shape the checks now reject, so a stub that short would test nothing real.
 LONG_HOOK = (
     "Who taught the caregiver?\n\n"
-    "Usually nobody. The discharge summary lists the medications and the follow-up, and "
-    "it assumes somebody at home already knows how to do the transfers.\n\n"
+    "Usually nobody. The discharge summary lists the medications and the follow-up, "
+    "and assumes somebody at home knows how to do the transfers.\n\n"
     "Training tied to the treatment plan may be billable when a clinician runs it."
 )
 LONG_HANDOVER = (
     "Discharge day is not a teaching moment.\n\n"
-    "It is a handover, and the person receiving it has been awake since five with a "
+    "It is a handover, and the person taking it has been awake since five with a "
     "folder in one hand and no idea what a safe transfer looks like.\n\n"
     "Plan-tied caregiver training exists to close exactly that gap."
 )
@@ -48,10 +49,10 @@ LONG_LINKEDIN = (
     "has to name the goal in the plan that the session served."
 )
 STUB_CODES = (
-    "Medicare added caregiver training codes and most discharges still ignore them.\n\n"
+    "Medicare added caregiver training codes and most discharges ignore them.\n\n"
     "The sessions may be billable when the note ties them to the patient's own goals, "
-    "and almost nobody has changed the discharge workflow to use them.\n\n"
-    "The gap is documentation, not willingness."
+    "and few teams have changed the discharge workflow to use them.\n\n"
+    "The gap is documentation."
 )
 STUB_ASSUMES = (
     "Discharge plans assume a trained caregiver.\n\n"
@@ -179,7 +180,7 @@ def test_promos_link_to_the_article_and_stay_in_the_care_stream(session: Session
     for draft in drafts:
         assert draft.stream == STREAM_CARE
         assert draft.article_id == article.id
-        assert article.slug in draft.link_reply
+        assert article.slug in draft.card_url
         assert draft.status == "ready_for_review"
 
 
@@ -187,16 +188,44 @@ def test_promo_links_are_tagged_and_point_at_a_page_with_a_form(session: Session
     """A promo that only links the article sends attention nowhere it can be used, and an
     untagged link can never be attributed after the fact."""
     article = make_article(session, audience="provider", published_url="https://x.test/a/slug")
+    card = promoter.card_url(article, channel="x", variant=2)
+    assert "https://x.test/a/slug?" in card
+    assert "utm_source=x" in card and "utm_campaign=care_article" in card
+    assert f"utm_content={article.slug}-v2" in card
     reply = promoter.link_reply(article, channel="x", variant=2)
-    assert "https://x.test/a/slug?" in reply
-    assert "utm_source=x" in reply and "utm_campaign=care_article" in reply
-    assert f"utm_content={article.slug}-v2" in reply
     assert "alvernahealth.com/providers?" in reply
     assert "utm_campaign=care_landing" in reply
     assert promoter.landing_url("trainer").endswith("/trainers")
 
 
-def test_releasing_an_article_gives_every_promo_its_photograph(session: Session, tmp_path) -> None:
+def test_the_article_link_rides_in_the_post_so_a_preview_card_renders(session: Session) -> None:
+    """X draws the card from the first link in the post itself. In the reply it is a bare
+    URL under a post nobody has a reason to trust yet."""
+    article = make_article(session, published_url="https://x.test/a/slug")
+    draft = promoter.run(session, _StubLLM(), [article])[0]
+    assert "https://x.test/a/slug?" in draft.card_url
+    assert "http" not in draft.body
+    assert "Full piece" not in draft.link_reply
+    assert publisher._thread(draft)[0].endswith(draft.card_url)
+
+
+def test_without_the_card_both_links_go_back_in_the_reply(session: Session, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "care_promo_link_card", False)
+    article = make_article(session, published_url="https://x.test/a/slug")
+    draft = promoter.run(session, _StubLLM(), [article])[0]
+    assert draft.card_url == ""
+    assert "Full piece: https://x.test/a/slug?" in draft.link_reply
+
+
+def test_the_card_link_is_charged_against_the_post_budget() -> None:
+    """t.co spends 23 characters on the link whatever its length, and X counts them."""
+    assert promoter.x_budget() == settings.max_post_chars - promoter.LINK_COST
+
+
+def test_releasing_an_article_gives_every_promo_its_photograph(
+    session: Session, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "care_promo_link_card", False)
     hero = tmp_path / "hero.jpg"
     hero.write_bytes(b"jpeg")
     article = make_article(
@@ -219,7 +248,21 @@ def test_releasing_an_article_gives_every_promo_its_photograph(session: Session,
     assert all(len(draft.assets) == 1 for draft in article.promos)
 
 
-def test_a_missing_hero_file_is_not_attached(session: Session, tmp_path) -> None:
+def test_the_card_supplies_the_photograph_instead_of_an_upload(session: Session, tmp_path) -> None:
+    """An uploaded image replaces the preview card on X, and the card is the version that
+    carries the headline and is clickable, so the hero arrives as og:image instead."""
+    hero = tmp_path / "hero.jpg"
+    hero.write_bytes(b"jpeg")
+    article = make_article(
+        session, published_url="https://x.test/a/slug", hero_path=str(hero), hero_alt="A grip."
+    )
+    promoter.run(session, _StubLLM(), [article])
+    assert promoter.attach_hero(session, article) == 0
+    assert all(draft.assets == [] for draft in article.promos)
+
+
+def test_a_missing_hero_file_is_not_attached(session: Session, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "care_promo_link_card", False)
     article = make_article(session, hero_path=str(tmp_path / "gone.jpg"))
     promoter.run(session, _StubLLM(), [article])
     assert promoter.attach_hero(session, article) == 0

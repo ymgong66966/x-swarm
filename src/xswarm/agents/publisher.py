@@ -70,10 +70,22 @@ def queued_times(session: Session) -> list[dt.datetime]:
 
 
 def _thread(draft: Draft) -> list[str]:
-    posts = [draft.body, *(draft.thread or [])]
+    first = f"{draft.body}\n\n{draft.card_url}" if draft.card_url else draft.body
+    posts = [first, *(draft.thread or [])]
     if draft.link_reply:
         posts.append(draft.link_reply)
     return posts
+
+
+def _media(draft: Draft, client: TypefullyClient) -> list[str]:
+    """Images to upload with the post.
+
+    None when the post carries a card link: an uploaded image replaces the preview card
+    on X, and the card is the one that shows the headline and is clickable end to end.
+    """
+    if draft.card_url:
+        return []
+    return [client.upload_media(Path(a.path)) for a in draft.assets if Path(a.path).exists()]
 
 
 def _title(draft: Draft) -> str:
@@ -102,7 +114,7 @@ def publish(
         log.info("dry run: would schedule draft %s for %s", draft.id, when.isoformat())
         return publication
 
-    media_ids = [client.upload_media(Path(a.path)) for a in draft.assets if Path(a.path).exists()]
+    media_ids = _media(draft, client)
     response = client.create_draft(
         _thread(draft),
         media_ids=media_ids,
@@ -141,7 +153,7 @@ def resend(
         log.info("dry run: would rewrite typefully %s", publication.provider_draft_id)
         return publication
 
-    media_ids = [client.upload_media(Path(a.path)) for a in draft.assets if Path(a.path).exists()]
+    media_ids = _media(draft, client)
     # No `publish_at`: the provider's own schedule is left exactly as it is. SQLite hands
     # `scheduled_for` back without its timezone, so re-sending it could silently move the
     # post by the UTC offset.

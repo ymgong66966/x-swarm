@@ -70,6 +70,29 @@ def test_publish_persists_provider_id_and_thread(session, brief):
     assert kwargs["plan_only"] is True
 
 
+def test_a_card_link_goes_in_the_post_and_replaces_the_upload(session, brief, tmp_path):
+    """X shows either an uploaded image or the link's preview card, never both, and the
+    card is the one that carries the headline and is clickable."""
+    image = tmp_path / "hero.jpg"
+    image.write_bytes(b"jpeg")
+    draft = make_draft(brief, "the post", link_reply="Providers: https://a.test/providers")
+    draft.card_url = "https://a.test/x?utm_source=x"
+    draft.assets.append(Asset(kind="hero", path=str(image)))
+    draft.status = "approved"
+    session.add(draft)
+    session.flush()
+
+    client = FakeClient()
+    publisher.publish(
+        session, draft, dt.datetime(2026, 8, 20, 12, 30, tzinfo=dt.timezone.utc), client=client
+    )
+
+    posts, kwargs = client.drafts[0]
+    assert posts[0] == "the post\n\nhttps://a.test/x?utm_source=x"
+    assert posts[1] == "Providers: https://a.test/providers"
+    assert kwargs["media_ids"] == []
+
+
 def test_dry_run_records_intent_without_calling_the_api(session, brief):
     draft = make_draft(brief, "the post")
     draft.status = "approved"
