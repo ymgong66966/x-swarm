@@ -92,6 +92,30 @@ class TypefullyClient:
             time.sleep(MEDIA_POLL_INTERVAL_S)
         raise TypefullyError(f"media {media_id} not ready after {MEDIA_TIMEOUT_S:.0f}s")
 
+    def _draft_payload(
+        self,
+        posts: list[str],
+        *,
+        media_ids: list[str] | None = None,
+        publish_at: dt.datetime | None = None,
+        plan_only: bool = False,
+        title: str = "",
+    ) -> dict[str, object]:
+        first: dict[str, object] = {"text": posts[0]}
+        if media_ids:
+            first["media_ids"] = media_ids
+        payload: dict[str, object] = {
+            "platforms": {
+                "x": {"enabled": True, "posts": [first, *({"text": p} for p in posts[1:])]}
+            }
+        }
+        if title:
+            payload["draft_title"] = title
+        if publish_at:
+            key = "plan_at" if plan_only else "publish_at"
+            payload[key] = publish_at.isoformat()
+        return payload
+
     def create_draft(
         self,
         posts: list[str],
@@ -106,20 +130,32 @@ class TypefullyClient:
         `plan_only` puts the draft on the queue at its date but never auto-publishes —
         that is the human-in-the-loop mode we start in.
         """
-        first: dict[str, object] = {"text": posts[0]}
-        if media_ids:
-            first["media_ids"] = media_ids
-        payload: dict[str, object] = {
-            "platforms": {
-                "x": {"enabled": True, "posts": [first, *({"text": p} for p in posts[1:])]}
-            }
-        }
-        if title:
-            payload["draft_title"] = title
-        if publish_at:
-            key = "plan_at" if plan_only else "publish_at"
-            payload[key] = publish_at.isoformat()
+        payload = self._draft_payload(
+            posts, media_ids=media_ids, publish_at=publish_at, plan_only=plan_only, title=title
+        )
         return self._request("POST", f"/social-sets/{self.social_set_id}/drafts", json=payload)
+
+    def update_draft(
+        self,
+        draft_id: str,
+        posts: list[str],
+        *,
+        media_ids: list[str] | None = None,
+        publish_at: dt.datetime | None = None,
+        plan_only: bool = False,
+        title: str = "",
+    ) -> dict:
+        """Rewrite a draft already sitting on the queue, keeping its slot and its id.
+
+        Editing beats delete-and-recreate: the post keeps its place in the queue and its
+        provider id, so the metrics we later pull still line up with the same `Draft`.
+        """
+        payload = self._draft_payload(
+            posts, media_ids=media_ids, publish_at=publish_at, plan_only=plan_only, title=title
+        )
+        return self._request(
+            "PATCH", f"/social-sets/{self.social_set_id}/drafts/{draft_id}", json=payload
+        )
 
     def analytics_posts(
         self, start_date: dt.date, end_date: dt.date, *, limit: int = 100

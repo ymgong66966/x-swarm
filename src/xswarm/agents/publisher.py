@@ -119,6 +119,44 @@ def publish(
     return publication
 
 
+def resend(
+    session: Session,
+    draft: Draft,
+    *,
+    client: TypefullyClient | None = None,
+    plan_only: bool = True,
+) -> Publication:
+    """Push a draft's current text, media and links over the copy already on the queue.
+
+    Needed whenever a promo changes after it was queued — a hero image arrives, or the
+    links get re-stamped once the live URL is known. Patching keeps the queue slot, the
+    scheduled time and the provider id, so later metrics still attach to the same draft.
+    """
+    publication = draft.publication
+    if publication is None or not publication.provider_draft_id:
+        raise ValueError(f"draft {draft.id} was never sent to a provider")
+    if publication.status == "published" or publication.published_at:
+        raise ValueError(f"draft {draft.id} is already published; editing it is not possible")
+    if client is None:
+        log.info("dry run: would rewrite typefully %s", publication.provider_draft_id)
+        return publication
+
+    media_ids = [client.upload_media(Path(a.path)) for a in draft.assets if Path(a.path).exists()]
+    # No `publish_at`: the provider's own schedule is left exactly as it is. SQLite hands
+    # `scheduled_for` back without its timezone, so re-sending it could silently move the
+    # post by the UTC offset.
+    client.update_draft(
+        publication.provider_draft_id,
+        _thread(draft),
+        media_ids=media_ids,
+        plan_only=plan_only,
+        title=_title(draft),
+    )
+    session.flush()
+    log.info("rewrote typefully %s from draft %s", publication.provider_draft_id, draft.id)
+    return publication
+
+
 def run(
     session: Session,
     *,

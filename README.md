@@ -51,6 +51,7 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm ingest add <link\|file\|text>` | Your own material → thread + visual, held for review |
 | `xswarm ingest schedule 12` | Queue an **approved** ingest draft in Typefully |
 | `xswarm publish` | Queue approved drafts in Typefully at the next free slots |
+| `xswarm requeue 15` | Rewrite drafts already on the Typefully queue from their current text, image and links |
 | `xswarm sync-metrics` | Pull X analytics for published posts |
 | `xswarm strategy` | Aggregate performance and rewrite `playbook.md` |
 | `xswarm stats` | Row counts |

@@ -96,3 +96,23 @@ def test_missing_key_refuses_to_construct(monkeypatch):
     monkeypatch.setattr(settings, "typefully_api_key", None)
     with pytest.raises(TypefullyError):
         TypefullyClient()
+
+
+def test_updates_a_queued_draft_in_place():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["url"] = str(request.url)
+        seen["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "d1"})
+
+    when = dt.datetime(2026, 8, 20, 12, 30, tzinfo=dt.timezone.utc)
+    client(handler).update_draft(
+        "d1", ["main post", "Full piece: https://a.test/x"], media_ids=["m1"], publish_at=when,
+        plan_only=True,
+    )
+    assert seen["method"] == "PATCH"
+    assert seen["url"].endswith("/social-sets/set-1/drafts/d1")
+    assert seen["json"]["platforms"]["x"]["posts"][0]["media_ids"] == ["m1"]
+    assert seen["json"]["plan_at"] == when.isoformat()

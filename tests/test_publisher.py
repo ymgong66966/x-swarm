@@ -4,11 +4,12 @@ import datetime as dt
 import random
 from zoneinfo import ZoneInfo
 
+import pytest
 from conftest import make_draft
 
 from xswarm.agents import publisher
 from xswarm.config import settings
-from xswarm.models import Publication
+from xswarm.models import Asset, Publication
 
 ET = ZoneInfo("America/New_York")
 
@@ -108,3 +109,67 @@ def test_run_skips_drafts_already_scheduled(session, brief, monkeypatch):
     session.flush()
 
     assert publisher.run(session, dry_run=True) == []
+
+
+class FakeUpdateClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.updates = []
+
+    def update_draft(self, draft_id, posts, **kwargs):
+        self.updates.append((draft_id, posts, kwargs))
+        return {"id": draft_id}
+
+
+def test_resend_rewrites_the_queued_copy_without_moving_it(session, brief, tmp_path):
+    """A promo that gained an image after it was queued has to reach the queued post,
+    and it must keep its slot and provider id or the metrics stop matching."""
+    image = tmp_path / "hero.jpg"
+    image.write_bytes(b"jpeg")
+    draft = make_draft(brief, "the post", link_reply="Full piece: https://a.test/x")
+    draft.assets.append(Asset(kind="hero", path=str(image)))
+    session.add(draft)
+    session.flush()
+    when = dt.datetime(2026, 8, 20, 12, 30, tzinfo=dt.timezone.utc)
+    session.add(
+        Publication(draft_id=draft.id, provider_draft_id="tf-9", scheduled_for=when,
+                    status="planned")
+    )
+    session.flush()
+
+    client = FakeUpdateClient()
+    publisher.resend(session, draft, client=client)
+
+    draft_id, posts, kwargs = client.updates[0]
+    assert draft_id == "tf-9"
+    assert posts == ["the post", "Full piece: https://a.test/x"]
+    assert kwargs["media_ids"] == ["media-hero.jpg"]
+    # The provider keeps its own schedule: re-sending a timezone-stripped time could move it.
+    assert "publish_at" not in kwargs
+    assert draft.publication.scheduled_for is not None
+    assert draft.publication.provider_draft_id == "tf-9"
+
+
+def test_resend_refuses_a_post_that_already_went_out(session, brief):
+    draft = make_draft(brief, "the post")
+    session.add(draft)
+    session.flush()
+    session.add(
+        Publication(
+            draft_id=draft.id,
+            provider_draft_id="tf-9",
+            status="published",
+            published_at=dt.datetime.now(dt.timezone.utc),
+        )
+    )
+    session.flush()
+    with pytest.raises(ValueError, match="already published"):
+        publisher.resend(session, draft, client=FakeUpdateClient())
+
+
+def test_resend_refuses_a_draft_never_sent(session, brief):
+    draft = make_draft(brief, "the post")
+    session.add(draft)
+    session.flush()
+    with pytest.raises(ValueError, match="never sent"):
+        publisher.resend(session, draft, client=FakeUpdateClient())

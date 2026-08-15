@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.table import Table
+from sqlalchemy import select
 
 from . import costs
 from .agents import (
@@ -49,6 +50,7 @@ from .models import (
     Publication,
     SiteFact,
 )
+from .publishers.typefully import TypefullyClient
 
 app = typer.Typer(help="Agent swarm for an ML-frontier X account", no_args_is_help=True)
 care_app = typer.Typer(help="Care stream: healthcare articles and their promo posts")
@@ -319,6 +321,52 @@ def publish_cmd(
                 publication.provider_draft_id or "",
             )
         console.print(table)
+
+
+@app.command("requeue")
+def requeue_cmd(
+    draft_ids: list[int] = typer.Argument(None, help="Drafts to rewrite; default: all queued"),
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Rewrite already-queued Typefully drafts from their current text, image and links.
+
+    For promos that changed after they were queued — a hero image landed, or the links
+    were re-stamped once the article went live. The queue slot and provider id survive,
+    so the metrics keep matching. Published posts are refused.
+    """
+    _setup_logging(verbose)
+    init_db()
+    if not settings.typefully_api_key and not dry_run:
+        console.print("[yellow]XSWARM_TYPEFULLY_API_KEY unset — dry run[/yellow]")
+        dry_run = True
+    client = None if dry_run else TypefullyClient()
+    table = Table("draft", "provider id", "media", "result")
+    with session_scope() as session:
+        if draft_ids:
+            drafts = [session.get(Draft, did) for did in draft_ids]
+            missing = [d for d, did in zip(drafts, draft_ids, strict=True) if d is None]
+            if missing:
+                raise typer.BadParameter("no such draft")
+        else:
+            drafts = [
+                d
+                for d in session.scalars(select(Draft).order_by(Draft.id))
+                if d.publication and d.publication.provider_draft_id
+            ]
+        for draft in drafts:
+            try:
+                publisher.resend(session, draft, client=client)
+                result = "[green]rewritten[/green]" if client else "dry run"
+            except ValueError as error:
+                result = f"[red]{error}[/red]"
+            table.add_row(
+                str(draft.id),
+                draft.publication.provider_draft_id if draft.publication else "",
+                str(len(draft.assets)),
+                result,
+            )
+    console.print(table)
 
 
 @app.command("sync-metrics")
