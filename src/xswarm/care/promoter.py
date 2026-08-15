@@ -245,7 +245,7 @@ def write(article: Article, llm: LLM) -> list[Draft]:
     posts: list[tuple[str, str]] = []
     linkedin = ""
     if isinstance(payload, dict):
-        linkedin = _clean(str(payload.get("linkedin", "")))
+        linkedin = _break_hook(_clean(str(payload.get("linkedin", ""))))
         for index, entry in enumerate(payload.get("x_posts", [])):
             if not isinstance(entry, dict):
                 continue
