@@ -39,6 +39,10 @@ DENSE_CHARS = 150
 # substance that earns the click, so the post is expected to use most of it.
 MIN_POST_CHARS = 190
 MIN_LINKEDIN_CHARS = 400
+# Every link on X costs 23 characters through t.co however long it is, plus the blank
+# line above it. The card link lives outside `body`, so the budget the writer is given
+# has to be the real limit minus that.
+LINK_COST = 25
 # The em dash is the most recognisable tell of generated prose. A person writing on a
 # phone types a comma, or starts a new sentence.
 DASH_RE = re.compile(r" *(?:[—–]|(?<= )--(?= )) *")
@@ -98,21 +102,54 @@ def landing_url(audience: str) -> str:
     return f"{settings.care_site_url.rstrip('/')}{path}"
 
 
-def link_reply(article: Article, *, channel: str, variant: int) -> str:
-    """The trailing reply of a promo: the article, then the page that can convert.
+def card_url(article: Article, *, channel: str, variant: int) -> str:
+    """The article link that goes in the post itself, to be rendered as a preview card.
 
-    Links never go in the post itself — X suppresses reach on link posts — and the reply
-    carries two of them because an article read with no route to `/providers` or
-    `/trainers` is attention we cannot use.
+    A bare post with the link hidden in a reply is a post the reader has to trust before
+    clicking. With the link in the post, X and LinkedIn fetch the page's own og:title,
+    og:description and og:image and draw a card: the hero photograph, the headline and
+    one line of the piece, all of it clickable.
+    """
+    if not settings.care_promo_link_card:
+        return ""
+    source = "linkedin" if channel == "linkedin" else "x"
+    return tag(
+        article_url(article),
+        campaign="care_article",
+        content=f"{article.slug}-v{variant}",
+        source=source,
+    )
+
+
+def link_reply(article: Article, *, channel: str, variant: int) -> str:
+    """The trailing reply of a promo: the page that can actually convert.
+
+    The article link moved up into the post to earn the preview card, so the reply is
+    what is left: an article read with no route to `/providers` or `/trainers` is
+    attention we cannot use. Without the card the reply carries both links again.
     """
     content = f"{article.slug}-v{variant}"
     source = "linkedin" if channel == "linkedin" else "x"
-    piece = tag(article_url(article), campaign="care_article", content=content, source=source)
     landing = tag(
         landing_url(article.audience), campaign="care_landing", content=content, source=source
     )
     label = LANDING_LABELS.get(article.audience, LANDING_LABELS["caregiver"])
-    return f"Full piece: {piece}\n\n{label}: {landing}"
+    reply = f"{label}: {landing}"
+    if settings.care_promo_link_card:
+        return reply
+    piece = tag(article_url(article), campaign="care_article", content=content, source=source)
+    return f"Full piece: {piece}\n\n{reply}"
+
+
+def x_budget() -> int:
+    """How many characters of prose an X promo may use.
+
+    The card link is charged against the same 280 as the words, so the writer's budget
+    is the post limit less what the link will cost once t.co rewrites it.
+    """
+    if not settings.care_promo_link_card:
+        return settings.max_post_chars
+    return max(MIN_POST_CHARS, settings.max_post_chars - LINK_COST)
 
 
 def hero_file(article: Article) -> Path | None:
@@ -128,10 +165,12 @@ def attach_hero(session: Session, article: Article) -> int:
 
     The same image on the post and the page is the point: it is what a reader recognises
     when the link opens, and a post with an image is not the same object on the timeline
-    as a post without one.
+    as a post without one. When the promo carries a card link the photograph arrives as
+    the card's own image instead: an uploaded image would replace the card, and the card
+    is the version that is clickable and carries the headline.
     """
     path = hero_file(article)
-    if path is None:
+    if path is None or settings.care_promo_link_card:
         return 0
     attached = 0
     for draft in article.promos:
@@ -157,9 +196,9 @@ def release(session: Session, article: Article) -> int:
     attaches the hero, then approves everything the editor cleared.
     """
     for draft in article.promos:
-        draft.link_reply = link_reply(
-            article, channel=str(draft.features.get("channel", "x")), variant=draft.variant
-        )
+        channel = str(draft.features.get("channel", "x"))
+        draft.link_reply = link_reply(article, channel=channel, variant=draft.variant)
+        draft.card_url = card_url(article, channel=channel, variant=draft.variant)
     attach_hero(session, article)
     approved = [d for d in article.promos if d.status == "ready_for_review"]
     for draft in approved:
@@ -220,7 +259,7 @@ def _us_first(claims: list[str]) -> list[str]:
 def _fallback_posts(article: Article) -> list[tuple[str, str]]:
     """Without a model the thesis is still a true, sourced sentence, so it can carry one
     post. Anything more would be invention."""
-    return [(_clean(article.thesis)[: settings.max_post_chars], "finding")]
+    return [(_clean(article.thesis)[: x_budget()], "finding")]
 
 
 def write(article: Article, llm: LLM) -> list[Draft]:
@@ -234,7 +273,7 @@ def write(article: Article, llm: LLM) -> list[Draft]:
             evidence="\n".join(f"- {claim}" for claim in _us_first(article.evidence)[:10])
             or "- (none)",
             variants=settings.care_promos_per_article,
-            max_chars=settings.max_post_chars,
+            max_chars=x_budget(),
             min_chars=MIN_POST_CHARS,
         ),
         strong=True,
@@ -264,6 +303,7 @@ def write(article: Article, llm: LLM) -> list[Draft]:
                 variant=index,
                 body=body,
                 link_reply=link_reply(article, channel="x", variant=index),
+                card_url=card_url(article, channel="x", variant=index),
                 features={
                     "hook_style": angle,
                     "pillar": article.pillar,
@@ -281,6 +321,7 @@ def write(article: Article, llm: LLM) -> list[Draft]:
                 variant=len(drafts),
                 body=linkedin,
                 link_reply=link_reply(article, channel="linkedin", variant=len(drafts)),
+                card_url=card_url(article, channel="linkedin", variant=len(drafts)),
                 features={
                     "hook_style": "linkedin",
                     "pillar": article.pillar,
@@ -369,7 +410,7 @@ def check(draft: Draft) -> list[str]:
     """
     notes: list[str] = []
     linkedin = draft.features.get("channel") == "linkedin"
-    limit = 900 if linkedin else settings.max_post_chars
+    limit = 900 if linkedin else x_budget()
     floor = MIN_LINKEDIN_CHARS if linkedin else MIN_POST_CHARS
     if not draft.body.strip():
         notes.append("empty post")

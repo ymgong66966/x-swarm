@@ -32,7 +32,9 @@ Shape of a post:
   hook with one line under it does not.
 - Stop when the thought is finished. No closing line that summarises, no call to action,
   no "learn more", no telling the reader to ask, request, contact, book or check
-  anything. The link is attached automatically and does that job.
+  anything. The article link is appended automatically and the platform renders it as a
+  preview card with the headline and the photograph, so the post never has to describe
+  what is on the other side of it.
 
 How it should sound:
 - Like one person talking to another. Contractions are fine. Sentence fragments are fine.
@@ -54,7 +56,7 @@ Rules that do not bend:
 - Never promise coverage, payment or a clinical outcome. "may be billable" is the
   strongest form allowed.
 - No medical advice, no patient stories, no invented quotes.
-- Do not include the link.
+- Do not include the link or any URL: it is appended after your text.
 - Each X post takes a different angle: one states what was found, one names the
   operational consequence, one takes on the objection a skeptical reader would raise.
 

@@ -231,6 +231,10 @@ class Settings(BaseSettings):
     # what should reach the writer; set this to "" to search worldwide again.
     care_research_geo_filter: str = '(United States[Affiliation] OR "United States"[MeSH Terms])'
     care_source_max_age_days: int = 45
+    # Put the article link in the promo itself so X and LinkedIn render their preview
+    # card (hero photo, headline, description, all clickable). Set false to go back to a
+    # post with an uploaded image and the links in the trailing reply.
+    care_promo_link_card: bool = True
     care_pillars: list[str] = Field(
         default=[
             "policy_explainer",
