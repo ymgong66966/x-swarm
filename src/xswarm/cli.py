@@ -518,6 +518,29 @@ def care_export_cmd(article_id: list[int] = typer.Option(None)) -> None:
             console.print(str(path))
 
 
+@care_app.command("repromo")
+def care_repromo_cmd(article_id: int, dry_run: bool = False, verbose: bool = False) -> None:
+    """Re-write an article's promo posts, keeping their rows (and any queue slots)."""
+    _setup_logging(verbose)
+    init_db()
+    with session_scope() as session:
+        article = session.get(Article, article_id)
+        if article is None:
+            raise typer.BadParameter(f"no article {article_id}")
+        drafts = care_promoter.rewrite(session, article, LLM(dry_run=dry_run))
+        table = Table("draft", "channel", "angle", "status", "post")
+        for draft in drafts:
+            table.add_row(
+                str(draft.id),
+                str(draft.features.get("channel", "x")),
+                str(draft.features.get("hook_style", "")),
+                draft.status,
+                draft.body.replace("\n", " ⏎ ")[:90],
+            )
+        console.print(table)
+        console.print("queued drafts still show the old copy until [bold]xswarm requeue[/bold]")
+
+
 @care_app.command("approve")
 def care_approve_cmd(article_id: int, reject: bool = False, reason: str = "") -> None:
     """Clear an article for publication (or reject it). Publishing requires this."""

@@ -62,6 +62,7 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm care approve 12` | Human gate: mark a reviewed article approved (or `--reject --reason ...`) |
 | `xswarm care publish 12 --hero art.png` | Branch + draft PR the approved article into the Alverna site repo |
 | `xswarm care sync-edits 12` | Read edits you made in that PR back into the article |
+| `xswarm care repromo 12` | Re-write that article's promo posts in place, keeping their rows and queue slots |
 | `xswarm care status` | Every article's state: PR, live URL, promo posts |
 | `xswarm care promote 12` | Only once the article URL returns 200: release its promo drafts |
 | `xswarm care watch` | Unattended sync-edits + promote for every article waiting on a site PR |
