@@ -105,7 +105,12 @@ def publish(
 ) -> Publication:
     """Hand one approved draft to Typefully. `plan_only` keeps it inert on the queue
     until a human confirms — phase-1 autonomy."""
-    publication = draft.publication or Publication(draft_id=draft.id)
+    # Loaded by query rather than through `draft.publication`: a relationship read earlier
+    # in this session caches the None from before a dry run wrote its row, and inserting a
+    # second publication for one draft violates the unique constraint.
+    publication = session.scalar(
+        select(Publication).where(Publication.draft_id == draft.id)
+    ) or Publication(draft_id=draft.id)
     publication.scheduled_for = when
 
     if client is None:
@@ -169,6 +174,19 @@ def resend(
     return publication
 
 
+def _unsent(draft: Draft) -> bool:
+    """Whether the provider has never seen this draft.
+
+    A dry run leaves a `Publication` behind still `pending` and with no
+    `provider_draft_id`, which used to take the draft out of every later run: it looked
+    scheduled and had never been sent.
+    """
+    publication = draft.publication
+    if publication is None:
+        return True
+    return publication.status == "pending" and not publication.provider_draft_id
+
+
 def run(
     session: Session,
     *,
@@ -178,18 +196,17 @@ def run(
 ) -> list[Publication]:
     """Schedule everything a human approved (plus any pillar allowed to self-publish)."""
     approved = list(
-        session.scalars(
-            select(Draft)
-            .where(Draft.status == "approved", Draft.publication == None)  # noqa: E711
-            .order_by(Draft.created_at)
-        )
+        session.scalars(select(Draft).where(Draft.status == "approved").order_by(Draft.created_at))
     )
+    approved = [d for d in approved if _unsent(d)]
     if settings.autopublish_pillars:
-        auto = session.scalars(
-            select(Draft)
-            .where(Draft.status == "ready_for_review", Draft.publication == None)  # noqa: E711
-            .order_by(Draft.created_at)
-        )
+        auto = [
+            d
+            for d in session.scalars(
+                select(Draft).where(Draft.status == "ready_for_review").order_by(Draft.created_at)
+            )
+            if _unsent(d)
+        ]
         approved += [d for d in auto if d.features.get("pillar") in settings.autopublish_pillars]
     if limit is not None:
         approved = approved[:limit]
