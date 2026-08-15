@@ -227,6 +227,9 @@ class Settings(BaseSettings):
             "family caregiver burden readmission",
         ]
     )
+    # Appended to every PubMed query. Alverna publishes into the US market, so US work is
+    # what should reach the writer; set this to "" to search worldwide again.
+    care_research_geo_filter: str = '(United States[Affiliation] OR "United States"[MeSH Terms])'
     care_source_max_age_days: int = 45
     care_pillars: list[str] = Field(
         default=[

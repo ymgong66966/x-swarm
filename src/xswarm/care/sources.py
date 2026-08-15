@@ -116,17 +116,25 @@ def federal_register(client: httpx.Client | None = None) -> list[RawItem]:
 
 
 def research(client: httpx.Client | None = None) -> list[RawItem]:
-    """PubMed. Used for effect sizes and outcomes, never for policy."""
+    """PubMed, scoped to the market we publish into.
+
+    A caregiver-burden cohort from Taipei is real evidence and the wrong thing to lead a
+    post with, so the geography is applied at the query rather than argued about later.
+    Clearing `care_research_geo_filter` restores the worldwide search.
+    """
     http, owns = _client(client)
     items: list[RawItem] = []
     try:
         for query in settings.care_research_queries:
+            term = query
+            if settings.care_research_geo_filter:
+                term = f"({query}) AND {settings.care_research_geo_filter}"
             try:
                 found = http.get(
                     PUBMED_SEARCH,
                     params={
                         "db": "pubmed",
-                        "term": query,
+                        "term": term,
                         "retmode": "json",
                         "retmax": "8",
                         "sort": "date",

@@ -18,10 +18,36 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import STREAM_CARE, Candidate, Item
 from ..sources import normalize_title
+from .editor import NON_US_RE
 
 log = logging.getLogger(__name__)
 
-WEIGHTS = {"authority": 0.35, "subject_fit": 0.30, "freshness": 0.20, "novelty": 0.15}
+WEIGHTS = {
+    "authority": 0.32,
+    "subject_fit": 0.27,
+    "freshness": 0.17,
+    "novelty": 0.12,
+    "us_fit": 0.12,
+}
+
+# Alverna sells into the United States, so a study of a health system nobody here works
+# in is worth less than the same finding from a US cohort, and a CMS rule is worth most.
+US_MARKERS = (
+    "medicare",
+    "medicaid",
+    "cms",
+    "united states",
+    "u.s.",
+    "us ",
+    "american",
+    "federal register",
+    "hhs",
+    "cpt",
+    "hcpcs",
+    "fee schedule",
+    "medicare advantage",
+    "veterans affairs",
+)
 
 # An item's evidence kind decides how far it can carry a piece on its own.
 AUTHORITY = {"regulatory": 1.0, "research": 0.85, "press": 0.5, "signal": 0.25}
@@ -74,6 +100,23 @@ def score_authority(item: Item) -> float:
     if any(host.endswith(allowed) for allowed in settings.care_authoritative_hosts):
         base = max(base, 0.9)
     return base
+
+
+def score_us_fit(item: Item) -> float:
+    """How much this item is about the market we publish into.
+
+    Not a filter: a foreign randomised trial can still be the best evidence for a
+    mechanism, and the writer may use it with a label. It just should not out-rank a CMS
+    rule for the front of the queue, which is what happened before this score existed.
+    """
+    text = f"{item.title} {item.summary}".lower()
+    domestic = any(marker in text for marker in US_MARKERS)
+    foreign = bool(NON_US_RE.search(text))
+    if domestic and not foreign:
+        return 1.0
+    if domestic:
+        return 0.6
+    return 0.15 if foreign else 0.5
 
 
 def score_subject_fit(item: Item) -> float:
@@ -152,6 +195,7 @@ def run(session: Session, run_date: dt.date | None = None) -> list[Candidate]:
             "subject_fit": score_subject_fit(item),
             "freshness": score_freshness(item, run_date),
             "novelty": score_novelty(item, history),
+            "us_fit": score_us_fit(item),
         }
         # Something we cannot tie to the subject is not worth an article, however loud.
         if subscores["subject_fit"] < 0.2:
