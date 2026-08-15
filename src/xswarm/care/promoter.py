@@ -356,8 +356,13 @@ def _best_effort(article: Article, llm: LLM, attempts: int = VOICE_ATTEMPTS) -> 
     return best[1]
 
 
-def rewrite(session: Session, article: Article, llm: LLM) -> list[Draft]:
+def rewrite(
+    session: Session, article: Article, llm: LLM, *, only: set[int] | None = None
+) -> list[Draft]:
     """Re-write an article's promos in place, keeping the rows.
+
+    `only` narrows it to particular draft ids, for the case where one promo of the set was
+    blocked and the rest are already queued and approved by a human.
 
     Not `write()` again into new rows: a promo that is already on the Typefully queue
     owns a publication and a slot, and both are addressed by draft id. Replacing the row
@@ -371,6 +376,8 @@ def rewrite(session: Session, article: Article, llm: LLM) -> list[Draft]:
 
     changed: list[Draft] = []
     for existing in sorted(article.promos, key=lambda d: d.variant):
+        if only is not None and existing.id not in only:
+            continue
         publication = existing.publication
         if publication is not None and (
             publication.status == "published" or publication.published_at

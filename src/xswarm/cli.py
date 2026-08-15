@@ -567,7 +567,14 @@ def care_export_cmd(article_id: list[int] = typer.Option(None)) -> None:
 
 
 @care_app.command("repromo")
-def care_repromo_cmd(article_id: int, dry_run: bool = False, verbose: bool = False) -> None:
+def care_repromo_cmd(
+    article_id: int,
+    draft_id: list[int] = typer.Option(
+        None, "--draft", help="Rewrite only these promos; default: all of the article's"
+    ),
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
     """Re-write an article's promo posts, keeping their rows (and any queue slots)."""
     _setup_logging(verbose)
     init_db()
@@ -575,7 +582,9 @@ def care_repromo_cmd(article_id: int, dry_run: bool = False, verbose: bool = Fal
         article = session.get(Article, article_id)
         if article is None:
             raise typer.BadParameter(f"no article {article_id}")
-        drafts = care_promoter.rewrite(session, article, LLM(dry_run=dry_run))
+        drafts = care_promoter.rewrite(
+            session, article, LLM(dry_run=dry_run), only=set(draft_id) or None
+        )
         table = Table("draft", "channel", "angle", "status", "post")
         for draft in drafts:
             table.add_row(
