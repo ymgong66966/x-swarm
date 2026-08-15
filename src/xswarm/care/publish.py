@@ -315,9 +315,11 @@ def _place_hero(source: Path, target: Path) -> None:
     """Copy the hero into the site, shrinking flat illustration to a small palette.
 
     The generator returns full-colour PNGs around 2 MB, which is a slow banner on a page
-    that is otherwise text. The art is flat vector-style, so a 64-colour palette is
-    visually identical at roughly a fifth of the bytes. Anything we cannot open is copied
-    through untouched rather than failing the publish.
+    that is otherwise text. Flat vector-style art is visually identical at 64 colours and
+    roughly a fifth of the bytes. Photographs arrive as JPEG, already resized and
+    compressed at generation time, and are copied through: a palette that small puts
+    visible banding through skin tone and window light. Anything we cannot open is also
+    copied through untouched rather than failing the publish.
     """
     if source.suffix.lower() != ".png":
         shutil.copyfile(source, target)

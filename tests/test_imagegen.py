@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
+import io
 
 import pytest
 from conftest import make_draft
+from PIL import Image
 
 from xswarm import imagegen
 from xswarm.agents import illustrator, visualizer
 from xswarm.config import settings
 from xswarm.imagegen import ArtSpec
 from xswarm.llm import LLM, Usage
+from xswarm.models import Article
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
@@ -24,15 +28,17 @@ class FakeLLM(LLM):
         self.provider = "fake"
         self.usage: list[Usage] = []
         self.prompts: list[str] = []
+        self.calls: list[dict[str, str]] = []
 
     def complete_json(self, prompt, **kwargs):
         return self.payload
 
-    def image(self, prompt, *, agent="illustrator"):
+    def image(self, prompt, *, agent="illustrator", model="", quality=""):
         self.prompts.append(prompt)
+        self.calls.append({"model": model, "quality": quality})
         if self._image is None:
             return None
-        self.usage.append(Usage(agent, settings.image_model, 0, 0, images=1))
+        self.usage.append(Usage(agent, model or settings.image_model, 0, 0, images=1))
         return self._image
 
 
@@ -59,6 +65,39 @@ def test_site_hero_drops_the_dark_ground_but_keeps_the_no_text_rule():
     assert "#fbf9f5" in prompt
     assert "#0d1117" not in prompt
     assert "No text" in prompt
+
+
+def test_a_site_photo_asks_for_people_and_drops_the_no_faces_rule():
+    """The illustration constraints are what made caregiving banners pictures of empty
+    furniture; a photograph of care has to be allowed to contain the carer."""
+    prompt = imagegen.build_prompt(
+        ArtSpec(style="site_photo", subject="A daughter steadying her father at the bedside")
+    )
+    assert "documentary" in prompt and "photograph of real caregiving" in prompt
+    assert "No human faces" not in prompt
+    assert "Flat editorial illustration" not in prompt
+    assert "#0d1117" not in prompt
+    assert "No text" in prompt
+    assert "no name badges" in prompt
+
+
+def test_a_photo_retry_does_not_ask_for_shapes_only(tmp_path):
+    llm = TextReadingLLM(["YES", "NO"])
+    imagegen.generate(ArtSpec(style="site_photo", subject="a bedside"), tmp_path / "a.png", llm)
+    assert "Draw shapes only" not in llm.prompts[1]
+    assert "Keep every surface blank" in llm.prompts[1]
+
+
+def test_a_jpg_hero_is_re_encoded_and_capped_in_width(tmp_path, monkeypatch):
+    """Photographs skip the flat-art palette squeeze, so the size has to come off here."""
+    monkeypatch.setattr(settings, "hero_max_width", 800)
+    buffer = io.BytesIO()
+    Image.new("RGB", (1536, 1024), "white").save(buffer, "PNG")
+    path = tmp_path / "hero.jpg"
+    assert imagegen.generate(ArtSpec(subject="x"), path, FakeLLM(image=buffer.getvalue())) == path
+    with Image.open(path) as written:
+        assert written.format == "JPEG"
+        assert written.size == (800, 533)
 
 
 def test_dry_run_generates_nothing(tmp_path):
@@ -198,3 +237,42 @@ def test_an_image_that_keeps_its_text_is_not_used(tmp_path):
     llm = TextReadingLLM(["YES", "YES"])
     assert imagegen.generate(ArtSpec(subject="a lattice"), tmp_path / "art.png", llm) is None
     assert not (tmp_path / "art.png").exists()
+
+
+def test_an_article_hero_is_a_photograph_shot_on_the_better_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "assets_dir", tmp_path)
+    article = Article(
+        id=3,
+        run_date=dt.date(2026, 8, 14),
+        pillar="transitions_of_care",
+        audience="caregiver",
+        thesis="Discharge preparation lowers caregiver stress.",
+        title="Be ready for hospital discharge",
+        slug="be-ready-for-hospital-discharge",
+        dek="What to ask for before the car ride home.",
+        meta_description="Discharge training for dementia caregivers.",
+        body_md="Unplanned discharges leave caregivers doing transfers they were never shown.",
+        evidence=["Training before discharge is associated with lower caregiver strain."],
+    )
+    buffer = io.BytesIO()
+    Image.new("RGB", (1536, 1024), "white").save(buffer, "PNG")
+    llm = FakeLLM(
+        {
+            "subject": "A nurse kneeling to show a transfer grip while a daughter steadies her "
+            "father at the edge of the bed",
+            "emphasis": "the two pairs of hands on his forearm",
+            "alt_text": "A nurse and a daughter helping an older man stand from a bed at home.",
+        },
+        image=buffer.getvalue(),
+    )
+    drawn = illustrator.illustrate_article(article, llm)
+    assert drawn is not None
+    path, alt = drawn
+    assert path.suffix == ".jpg" and path.exists()
+    assert alt.startswith("A nurse and a daughter")
+    assert llm.calls[0] == {
+        "model": settings.hero_image_model,
+        "quality": settings.hero_image_quality,
+    }
+    assert "transfer grip" in llm.prompts[0]
+    assert "No human faces" not in llm.prompts[0]

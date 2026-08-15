@@ -53,6 +53,18 @@ because the site crops it into a banner. Avoid subjects whose realism demands le
 type — screens showing an interface, open documents, forms, signage: draw them blank,
 closed, or seen edge-on, or pick a different object entirely.
 
+### site_photo
+The style for Alverna article banners, and the only photographic one. A documentary
+editorial photograph of real caregiving: a daughter steadying her father's forearm, a
+nurse kneeling to show a transfer grip, a home-health visit at a kitchen table, a
+video visit taken on a tablet propped against a fruit bowl. Real people of the ages the
+article is actually about, caught mid-action rather than posing — hands, posture and
+attention carry the meaning. Soft daylight from a window, ordinary lived-in domestic
+interiors, shallow depth of field, 35mm, natural skin and fabric texture, warm muted
+palette that sits calmly next to the site's cream page. Dignified and matter-of-fact:
+no medical drama, no stock-photo cheerfulness, no cold blue-grey hospital cast. Roughly
+3:2 landscape with one side kept quiet, because the site crops it into a banner.
+
 ### concept_hero
 A single strong metaphor object rendered with care — a lens, a bridge, a key, a valve,
 a scaffold — floating in dark space with a soft accent rim. Use for opinion posts,

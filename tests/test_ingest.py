@@ -50,7 +50,7 @@ class FakeLLM(LLM):
         self.last_prompt = prompt
         return self.payload
 
-    def image(self, prompt, *, agent="illustrator"):
+    def image(self, prompt, *, agent="illustrator", model="", quality=""):
         return self._image
 
 
