@@ -676,6 +676,52 @@ def care_promote_cmd(
         console.print(f"{url} is live; approved {len(promos)} promo posts for scheduling")
 
 
+@care_app.command("watch")
+def care_watch_cmd(verbose: bool = False) -> None:
+    """Sync reviewer edits and promote every article whose site PR has already landed.
+
+    The unattended half of the loop: run it on a schedule (or on a merge webhook) and the
+    only human actions left are editing the PR and merging it.
+    """
+    _setup_logging(verbose)
+    init_db()
+    table = Table("id", "slug", "synced", "live", "promos")
+    with session_scope() as session:
+        pending = (
+            session.query(Article)
+            .filter(Article.site_branch.isnot(None), Article.status != "published")
+            .order_by(Article.id)
+            .all()
+        )
+        for article in pending:
+            try:
+                changed = care_publish.pull_edits(article)
+            except care_publish.PublishError as error:
+                table.add_row(str(article.id), article.slug, f"[red]{error}[/red]", "", "")
+                continue
+            url = care_publish.article_url(article)
+            live, status = care_publish.is_live(url, marker=care_publish.article_marker(article))
+            promoted = ""
+            if live:
+                article.published_url = url
+                article.status = "published"
+                promos = [d for d in article.promos if d.status == "ready_for_review"]
+                for draft in promos:
+                    draft.status = "approved"
+                promoted = f"approved {len(promos)}"
+            table.add_row(
+                str(article.id),
+                article.slug,
+                ", ".join(changed) or "no change",
+                "yes" if live else f"not yet ({status or 'no response'})",
+                promoted,
+            )
+        if not pending:
+            console.print("no article is waiting on a site pull request")
+            return
+    console.print(table)
+
+
 @app.command("crawl")
 def crawl_cmd(url: list[str] = typer.Option(None), verbose: bool = False) -> None:
     """Check robots, sitemap, indexability and metadata for the site's pages."""

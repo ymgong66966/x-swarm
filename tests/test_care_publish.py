@@ -213,6 +213,48 @@ def test_pull_edits_reads_the_reviewers_version_back(
     assert "Can this be furnished over telehealth?" in article.body_md
 
 
+def test_pull_edits_falls_back_to_main_once_the_branch_is_merged_and_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GitHub deletes the head branch on merge; `care watch` still has to find the text."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)], check=True)
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "clone", str(origin), str(seed)], check=True)
+    (seed / "README.md").write_text("site\n")
+    for args in (
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "test"],
+        ["add", "README.md"],
+        ["commit", "-m", "init"],
+        ["push", "-u", "origin", "main"],
+    ):
+        subprocess.run(["git", *args], cwd=seed, check=True)
+
+    monkeypatch.setattr(settings, "site_repo_url", str(origin))
+    monkeypatch.setattr(settings, "github_token", None)
+    article = make_article()
+    result = publish.publish(article, repo_dir=tmp_path / "site")
+    article.site_branch = result.branch
+
+    subprocess.run(["git", "fetch", "origin", result.branch], cwd=seed, check=True)
+    subprocess.run(["git", "checkout", result.branch], cwd=seed, check=True)
+    edited = (seed / result.content_path).read_text()
+    (seed / result.content_path).write_text(
+        edited.replace(
+            '"Caregiver training you are allowed to bill for"', '"Bill for caregiver training"'
+        )
+    )
+    subprocess.run(["git", "commit", "-am", "edit"], cwd=seed, check=True)
+    subprocess.run(["git", "checkout", "main"], cwd=seed, check=True)
+    subprocess.run(["git", "merge", "--no-ff", "-m", "merge", result.branch], cwd=seed, check=True)
+    subprocess.run(["git", "push", "origin", "main"], cwd=seed, check=True)
+    subprocess.run(["git", "push", "origin", "--delete", result.branch], cwd=seed, check=True)
+
+    assert "title" in publish.pull_edits(article, repo_dir=tmp_path / "site")
+    assert article.title == "Bill for caregiver training"
+
+
 def test_pull_edits_without_a_publish_branch_is_refused() -> None:
     with pytest.raises(publish.PublishError, match="no publish branch"):
         publish.pull_edits(make_article(site_branch=None))
