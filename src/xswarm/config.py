@@ -36,7 +36,14 @@ class Settings(BaseSettings):
         }
     )
     # USD per generated image, by model. Priced for the configured size and quality.
-    image_prices: dict[str, float] = Field(default={"gpt-image-1": 0.063})
+    image_prices: dict[str, float] = Field(
+        default={
+            "gpt-image-1": 0.063,
+            # Landscape at high quality; site heroes are a handful a week, not per post.
+            "gpt-image-1.5": 0.25,
+            "gpt-image-2": 0.30,
+        }
+    )
     monthly_budget_usd: float = 20.0
 
     semantic_scholar_api_key: str | None = None
@@ -109,6 +116,15 @@ class Settings(BaseSettings):
     image_model: str = "gpt-image-1"
     image_size: str = "1536x1024"
     image_quality: str = "medium"
+    # Site article banners are photographs of real caregiving, not timeline illustration:
+    # a different, stronger model, run at high quality because the page is mostly text and
+    # the banner is the only thing carrying feeling. Costs ~5x a timeline image, but there
+    # are two of these a week against dozens of posts.
+    hero_image_model: str = "gpt-image-2"
+    hero_image_quality: str = "high"
+    # Photographs do not survive the flat-art palette squeeze, so heroes ship as JPEG.
+    hero_jpeg_quality: int = 82
+    hero_max_width: int = 1600
     # Named looks defined in prompts/art_direction.md. The Illustrator picks one.
     art_styles: list[str] = Field(
         default=[

@@ -20,6 +20,9 @@ from ..models import STREAM_ML, Article, Asset, Brief, Draft
 
 log = logging.getLogger(__name__)
 
+# Site banners are photographic; everything on the timeline stays illustrated.
+HERO_STYLE = "site_photo"
+
 # Which look fits which kind of argument, when no model is available to choose.
 _FALLBACK_STYLES = {
     "explainer": "frontier_diagram",
@@ -101,45 +104,55 @@ def build_spec(draft: Draft, brief: Brief | None, llm: LLM) -> ArtSpec:
 
 
 def article_spec(article: Article, llm: LLM) -> ArtSpec:
-    """The banner for a site article. Same art director, but the style is pinned to the
-    one light look: the image sits inside the article page, not on the timeline."""
+    """The banner for a site article: a photograph of the caregiving situation the piece
+    is about. A different art director from the timeline's, because the timeline one is
+    told never to draw a face — which is how these banners ended up as still lifes of
+    furniture, recognisable to nobody."""
     payload = llm.complete_json(
-        load_prompt("illustrator").format(
+        load_prompt("illustrator_photo").format(
             body=f"{article.title}\n\n{article.dek}\n\n{article.body_md[:4000]}",
             whats_new=article.thesis or article.meta_description,
-            what_it_replaces="",
-            key_number="",
-            caveat="",
             grounded_claims="\n".join(f"- {claim}" for claim in (article.evidence or [])[:12]),
             art_direction=art_direction(),
-            styles="site_hero",
         ),
         strong=False,
         max_tokens=700,
         agent="illustrator_care",
     )
-    spec = ArtSpec(style="site_hero")
+    spec = ArtSpec(style=HERO_STYLE)
     if isinstance(payload, dict):
         try:
-            spec = ArtSpec.model_validate({**payload, "style": "site_hero"})
+            spec = ArtSpec.model_validate({**payload, "style": HERO_STYLE})
         except ValidationError as exc:
             log.warning("art spec rejected for article %s: %s", article.id, exc.error_count())
     if not spec.subject.strip():
         spec.subject = (
-            "An abstract editorial illustration of the objects and environment behind: "
-            f"{article.title}"
+            "A family caregiver and a visiting nurse working together with an older adult "
+            f"at home, in the situation described by: {article.title}"
         )
     if not spec.alt_text.strip():
-        spec.alt_text = f"Abstract illustration: {spec.subject[:180]}"
+        spec.alt_text = f"Photograph: {spec.subject[:180]}"
     return spec
 
 
 def illustrate_article(article: Article, llm: LLM) -> tuple[Path, str] | None:
-    """Draw an article's hero. Returns the file and its alt text, or None when the image
-    provider is unavailable — an article without a banner is still publishable."""
+    """Shoot an article's hero. Returns the file and its alt text, or None when the image
+    provider is unavailable — an article without a banner is still publishable.
+
+    JPEG rather than PNG: this is a photograph, and the site's palette squeeze for flat
+    art would put banding through skin tone and window light.
+    """
     spec = article_spec(article, llm)
-    path = settings.assets_dir / f"article-{article.id}-hero.png"
-    if generate(spec, path, llm, agent="illustrator_care") is None:
+    path = settings.assets_dir / f"article-{article.id}-hero.jpg"
+    drawn = generate(
+        spec,
+        path,
+        llm,
+        agent="illustrator_care",
+        model=settings.hero_image_model,
+        quality=settings.hero_image_quality,
+    )
+    if drawn is None:
         return None
     return path, spec.alt_text
 

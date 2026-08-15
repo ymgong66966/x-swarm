@@ -136,20 +136,30 @@ class LLM:
             return
         self.usage.append(Usage(agent, model, int(prompt or 0), int(completion or 0)))
 
-    def image(self, prompt: str, *, agent: str = "illustrator") -> bytes | None:
+    def image(
+        self,
+        prompt: str,
+        *,
+        agent: str = "illustrator",
+        model: str = "",
+        quality: str = "",
+    ) -> bytes | None:
         """One generated image, or None when there is no image provider to call.
+
+        `model`/`quality` override the timeline defaults so an expensive look (a site
+        hero) can use a better model without making every post cost the same.
 
         Only OpenAI is wired up: Anthropic has no image generation, and a stream
         running on Anthropic falls back to the deterministic matplotlib templates.
         """
         if self.dry_run or self.provider != "openai":
             return None
-        model = settings.image_model
+        model = model or settings.image_model
         result = self._openai().images.generate(
             model=model,
             prompt=prompt,
             size=settings.image_size,
-            quality=settings.image_quality,
+            quality=quality or settings.image_quality,
             n=1,
         )
         data = result.data[0].b64_json if result.data else None
