@@ -22,6 +22,32 @@ from .editor import CLINICAL_DIRECTIVE_RE, banned_phrase_hits, promises_outcome
 log = logging.getLogger(__name__)
 
 ANGLES = ["finding", "consequence", "objection"]
+# An instruction to the reader at the start of a sentence. A post that ends "Ask your
+# provider about eligibility" is an ad; the same post without that line is someone
+# sharing what they found, and the attached link is the only invitation needed.
+CTA_RE = re.compile(
+    r"(?:^|[.!?\n]\s*)(?:always |be sure to |make sure to |remember to )?"
+    r"(?:ask|request|contact|confirm|check|reach out|talk to|book|schedule|"
+    r"learn more|read more|find out|discover|explore|see how|get started|sign up|"
+    r"don'?t miss)\b",
+    re.IGNORECASE,
+)
+# A hook only works if the eye can find it. Everything the model produced before this
+# check arrived as one unbroken block, which is the shape of a press release.
+DENSE_CHARS = 150
+MARKETING_TELLS = (
+    "unlock",
+    "empower",
+    "leverage",
+    "seamless",
+    "streamline",
+    "game changer",
+    "navigate the complexities",
+    "in today's landscape",
+    "signals the need",
+    "key to success",
+    "solutions",
+)
 TAKEAWAY_RE = re.compile(r"^- (.+)$", re.MULTILINE)
 BANNED_SOCIAL = ("#", "🧵", "🚨")
 # Where a reader of each audience should end up if the article did its job. The article
@@ -143,9 +169,30 @@ def _takeaways(article: Article) -> list[str]:
 
 
 def _clean(body: str) -> str:
+    """Tidy whitespace without flattening the post.
+
+    Line breaks are load-bearing: a hook line followed by the substance reads like a
+    person, the same words run into one paragraph read like a press release.
+    """
     for token in BANNED_SOCIAL:
         body = body.replace(token, "")
-    return re.sub(r"\s+", " ", body).strip()
+    body = re.sub(r"[ \t]+", " ", body)
+    body = re.sub(r" *\n *", "\n", body)
+    return re.sub(r"\n{3,}", "\n\n", body).strip()
+
+
+def _break_hook(body: str) -> str:
+    """Put the opening sentence on its own line when the model forgot to.
+
+    Purely typographic — no word changes — and it is the difference between a post that
+    opens with a hook and a paragraph that happens to start with a question.
+    """
+    if "\n" in body or len(body) <= DENSE_CHARS:
+        return body
+    match = re.search(r"^(.{15,120}?[.!?])\s+(\S)", body, re.DOTALL)
+    if match is None:
+        return body
+    return f"{match.group(1)}\n\n{body[match.start(2) :]}"
 
 
 def _fallback_posts(article: Article) -> list[tuple[str, str]]:
@@ -178,7 +225,7 @@ def write(article: Article, llm: LLM) -> list[Draft]:
         for index, entry in enumerate(payload.get("x_posts", [])):
             if not isinstance(entry, dict):
                 continue
-            body = _clean(str(entry.get("body", "")))
+            body = _break_hook(_clean(str(entry.get("body", ""))))
             if body:
                 posts.append((body, str(entry.get("angle", ANGLES[index % 3]))))
     if not posts:
@@ -222,8 +269,80 @@ def write(article: Article, llm: LLM) -> list[Draft]:
     return drafts
 
 
+KEEP_STATUS = {"approved", "scheduled"}
+VOICE_ATTEMPTS = 3
+
+
+def _best_effort(article: Article, llm: LLM, attempts: int = VOICE_ATTEMPTS) -> list[Draft]:
+    """Generate promos until they clear the checks, then keep the cleanest attempt.
+
+    The voice rules are the kind a model breaks once and then gets right when asked
+    again, so a retry is cheaper than a human rewriting the post by hand.
+    """
+    best: tuple[int, list[Draft]] | None = None
+    for _ in range(max(1, attempts)):
+        candidates = write(article, llm)
+        flaws = sum(len(check(draft)) for draft in candidates)
+        if best is None or flaws < best[0]:
+            best = (flaws, candidates)
+        if flaws == 0:
+            break
+    assert best is not None
+    return best[1]
+
+
+def rewrite(session: Session, article: Article, llm: LLM) -> list[Draft]:
+    """Re-write an article's promos in place, keeping the rows.
+
+    Not `write()` again into new rows: a promo that is already on the Typefully queue
+    owns a publication and a slot, and both are addressed by draft id. Replacing the row
+    would strand the queued post with the old copy forever. So the text changes and the
+    identity does not — `xswarm requeue` then pushes the new words over the queued ones.
+    """
+    fresh = _best_effort(article, llm)
+    by_channel: dict[str, list[Draft]] = {}
+    for draft in fresh:
+        by_channel.setdefault(str(draft.features.get("channel", "x")), []).append(draft)
+
+    changed: list[Draft] = []
+    for existing in sorted(article.promos, key=lambda d: d.variant):
+        publication = existing.publication
+        if publication is not None and (
+            publication.status == "published" or publication.published_at
+        ):
+            log.info("draft %s is already published; leaving it alone", existing.id)
+            continue
+        channel = str(existing.features.get("channel", "x"))
+        queue = by_channel.get(channel) or []
+        if not queue:
+            continue
+        replacement = queue.pop(0)
+        existing.body = replacement.body
+        existing.features = {**existing.features, "hook_style": replacement.features["hook_style"]}
+        notes = check(existing)
+        existing.editor_notes = notes
+        queued = publication is not None and bool(publication.provider_draft_id)
+        if queued:
+            # It is on the provider's queue whatever we think of the new words; moving it
+            # out of "scheduled" would only make the local state lie about that.
+            pass
+        elif notes:
+            existing.status = "blocked"
+        elif existing.status not in KEEP_STATUS:
+            existing.status = "ready_for_review"
+        changed.append(existing)
+    session.flush()
+    log.info("care promos: %d rewritten for article %s", len(changed), article.id)
+    return changed
+
+
 def check(draft: Draft) -> list[str]:
-    """Social copy gets the same safety floor as the article, at post length."""
+    """Social copy gets the same safety floor as the article, at post length.
+
+    Plus a voice floor. The first promos we wrote were safe and sourced and still read
+    like a brochure — a dense claim followed by an instruction to the reader. Those two
+    shapes are cheap to detect, so the model does not get to ship them.
+    """
     notes: list[str] = []
     limit = 900 if draft.features.get("channel") == "linkedin" else settings.max_post_chars
     if not draft.body.strip():
@@ -238,13 +357,20 @@ def check(draft: Draft) -> list[str]:
         notes.append("personalised clinical direction")
     if any(token in draft.body for token in BANNED_SOCIAL):
         notes.append("hashtag or emoji noise")
+    if len(draft.body) > DENSE_CHARS and "\n" not in draft.body.strip():
+        notes.append("one dense block; the hook needs its own line")
+    if CTA_RE.search(draft.body):
+        notes.append("ends on a call to action; the link already does that")
+    for phrase in MARKETING_TELLS:
+        if phrase in draft.body.lower():
+            notes.append(f"marketing filler: {phrase!r}")
     return notes
 
 
 def run(session: Session, llm: LLM, articles: list[Article]) -> list[Draft]:
     drafts: list[Draft] = []
     for article in articles:
-        for draft in write(article, llm):
+        for draft in _best_effort(article, llm):
             notes = check(draft)
             draft.editor_notes = notes
             draft.status = "blocked" if notes else "ready_for_review"

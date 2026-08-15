@@ -263,6 +263,123 @@ def test_promo_check_allows_hedged_copy() -> None:
     assert promoter.check(draft) == []
 
 
+def test_promo_check_blocks_a_call_to_action_and_marketing_filler() -> None:
+    """These read as safe and sourced and still sound like an ad; the link is the CTA."""
+    cta = Draft(
+        body="Training may be billable when tied to the plan.\nAsk your provider about "
+        "eligibility during discharge planning.",
+        features={"channel": "x"},
+        variant=0,
+    )
+    assert any("call to action" in note for note in promoter.check(cta))
+    filler = Draft(
+        body="Plan-aligned training solutions empower discharge teams.",
+        features={"channel": "x"},
+        variant=0,
+    )
+    assert any("marketing filler" in note for note in promoter.check(filler))
+
+
+def test_promo_check_allows_a_hook_and_keeps_its_line_breaks() -> None:
+    draft = Draft(
+        body="Who taught the caregiver?\n\nNobody, usually. Training may be billable when "
+        "it is tied to the treatment plan.",
+        features={"channel": "x"},
+        variant=0,
+    )
+    assert promoter.check(draft) == []
+    assert "\n" in promoter._clean(draft.body)
+
+
+def test_a_one_paragraph_post_gets_its_hook_onto_its_own_line() -> None:
+    dense = (
+        "Who taught the caregiver? Nobody did, usually, and the discharge plan still "
+        "assumes somebody at home already knows how to do the transfers safely every day."
+    )
+    assert promoter._break_hook(dense).startswith("Who taught the caregiver?\n\nNobody")
+    short = "Discharge day is not a teaching moment."
+    assert promoter._break_hook(short) == short
+
+
+def test_a_promo_that_breaks_the_voice_rules_is_generated_again(session: Session) -> None:
+    class _SecondTimeLucky:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def complete_json(self, prompt: str, **kwargs) -> dict:
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "x_posts": [
+                        {
+                            "body": "Medicare may cover caregiver training when the plan ties "
+                            "to it, which is a real change for discharge teams this year. "
+                            "Ask your provider about eligibility."
+                        }
+                    ],
+                    "linkedin": "",
+                }
+            return {
+                "x_posts": [{"body": "Who taught the caregiver?\n\nUsually nobody."}],
+                "linkedin": "",
+            }
+
+    article = make_article(session)
+    llm = _SecondTimeLucky()
+    drafts = promoter.run(session, llm, [article])
+    assert llm.calls == 2
+    assert [d.status for d in drafts] == ["ready_for_review"]
+
+
+def test_rewriting_promos_keeps_the_rows_that_own_a_queue_slot(session: Session) -> None:
+    """The new copy has to reach the post that is already scheduled, so the draft id and
+    its publication must survive a rewrite."""
+    article = make_article(session)
+    promoter.run(session, _StubLLM(), [article])
+    first = article.promos[0]
+    first.status = "scheduled"
+    session.add(Publication(draft_id=first.id, provider_draft_id="tf-9", status="planned"))
+    session.flush()
+    ids = [d.id for d in article.promos]
+
+    class _NewVoice(_StubLLM):
+        def complete_json(self, prompt: str, **kwargs) -> dict:
+            return {
+                "x_posts": [
+                    {"body": "Who taught the caregiver?\n\nUsually nobody."},
+                    {"body": "Discharge day is not a teaching moment.\n\nIt is a handover."},
+                ],
+                "linkedin": "Discharge quietly assumes someone at home was trained.",
+            }
+
+    changed = promoter.rewrite(session, article, _NewVoice())
+
+    assert [d.id for d in article.promos] == ids
+    assert [d.id for d in changed] == ids
+    assert article.promos[0].body.startswith("Who taught the caregiver?")
+    assert article.promos[0].status == "scheduled"  # still on the queue, new words
+    assert article.promos[0].publication.provider_draft_id == "tf-9"
+
+
+def test_rewriting_leaves_a_promo_that_already_went_out(session: Session) -> None:
+    article = make_article(session)
+    promoter.run(session, _StubLLM(), [article])
+    posted = article.promos[0]
+    before = posted.body
+    session.add(
+        Publication(
+            draft_id=posted.id,
+            provider_draft_id="tf-9",
+            status="published",
+            published_at=dt.datetime.now(dt.timezone.utc),
+        )
+    )
+    session.flush()
+
+    promoter.rewrite(session, article, _StubLLM())
+    assert posted.body == before
+
+
 def test_export_writes_frontmatter(session: Session, tmp_path) -> None:
     article = make_article(session)
     paths = export.run([article], directory=tmp_path)
