@@ -8,10 +8,19 @@ import pytest
 from sqlalchemy.orm import Session
 
 from xswarm.analytics import dashboard
-from xswarm.care import curator, export, promoter, writer
+from xswarm.care import curator, export, promoter, scorecard, writer
 from xswarm.care.angle import Evidence, Plan
 from xswarm.config import settings
-from xswarm.models import STREAM_CARE, STREAM_ML, Article, Draft, Item
+from xswarm.models import (
+    STREAM_CARE,
+    STREAM_ML,
+    Article,
+    CrawlCheck,
+    Draft,
+    Item,
+    PostMetric,
+    Publication,
+)
 
 TODAY = dt.date.today()
 
@@ -136,6 +145,87 @@ def test_promos_link_to_the_article_and_stay_in_the_care_stream(session: Session
         assert draft.article_id == article.id
         assert article.slug in draft.link_reply
         assert draft.status == "ready_for_review"
+
+
+def test_promo_links_are_tagged_and_point_at_a_page_with_a_form(session: Session) -> None:
+    """A promo that only links the article sends attention nowhere it can be used, and an
+    untagged link can never be attributed after the fact."""
+    article = make_article(session, audience="provider", published_url="https://x.test/a/slug")
+    reply = promoter.link_reply(article, channel="x", variant=2)
+    assert "https://x.test/a/slug?" in reply
+    assert "utm_source=x" in reply and "utm_campaign=care_article" in reply
+    assert f"utm_content={article.slug}-v2" in reply
+    assert "alvernahealth.com/providers?" in reply
+    assert "utm_campaign=care_landing" in reply
+    assert promoter.landing_url("trainer").endswith("/trainers")
+
+
+def test_releasing_an_article_gives_every_promo_its_photograph(session: Session, tmp_path) -> None:
+    hero = tmp_path / "hero.jpg"
+    hero.write_bytes(b"jpeg")
+    article = make_article(
+        session,
+        published_url="https://x.test/a/slug",
+        hero_path=str(hero),
+        hero_alt="A nurse showing a transfer grip.",
+    )
+    promoter.run(session, _StubLLM(), [article])
+
+    assert promoter.release(session, article) == len(article.promos)
+    for draft in article.promos:
+        assert draft.status == "approved"
+        assert [asset.path for asset in draft.assets] == [str(hero)]
+        assert draft.assets[0].alt_text == "A nurse showing a transfer grip."
+        assert "utm_source" in draft.link_reply
+
+    # Running it twice must not stack duplicate uploads onto the same post.
+    promoter.release(session, article)
+    assert all(len(draft.assets) == 1 for draft in article.promos)
+
+
+def test_a_missing_hero_file_is_not_attached(session: Session, tmp_path) -> None:
+    article = make_article(session, hero_path=str(tmp_path / "gone.jpg"))
+    promoter.run(session, _StubLLM(), [article])
+    assert promoter.attach_hero(session, article) == 0
+
+
+def test_scorecard_pairs_crawl_state_with_what_x_sent(session: Session) -> None:
+    article = make_article(
+        session, published_url="https://alvernahealth.com/resources/slug", status="published"
+    )
+    promoter.run(session, _StubLLM(), [article])
+    session.add(
+        CrawlCheck(
+            url=article.published_url,
+            status_code=200,
+            in_sitemap=True,
+            indexable=True,
+            issues=["title is 71 characters"],
+        )
+    )
+    publication = Publication(draft_id=article.promos[0].id, post_url="https://x.com/p/1")
+    session.add(publication)
+    session.flush()
+    session.add(PostMetric(publication_id=publication.id, impressions=400, link_clicks=8))
+    session.flush()
+
+    row = next(r for r in scorecard.build(session) if r.article_id == article.id)
+    assert row.indexable is True and row.in_sitemap is True
+    assert row.issues == ["title is 71 characters"]
+    assert row.impressions == 400 and row.link_clicks == 8
+    assert row.click_rate == 0.02
+    assert row.scheduled == 1 and row.promos == len(article.promos)
+
+
+def test_scorecard_reports_unknown_rather_than_healthy_for_an_unchecked_url(
+    session: Session,
+) -> None:
+    """A never-crawled article must not read as indexable — that is the failure the
+    scorecard exists to catch."""
+    article = make_article(session)
+    row = next(r for r in scorecard.build(session) if r.article_id == article.id)
+    assert row.indexable is None and row.in_sitemap is None
+    assert row.click_rate == 0.0
 
 
 def test_promo_check_blocks_unsafe_copy() -> None:

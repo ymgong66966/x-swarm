@@ -65,6 +65,7 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm care status` | Every article's state: PR, live URL, promo posts |
 | `xswarm care promote 12` | Only once the article URL returns 200: release its promo drafts |
 | `xswarm care watch` | Unattended sync-edits + promote for every article waiting on a site PR |
+| `xswarm care scorecard` | Per article: indexable, in the sitemap, and what its promos sent |
 | `xswarm crawl` | Robots, sitemap, indexability, title/meta/canonical per URL |
 | `xswarm sync-traffic` | Pull article traffic from Plausible |
 | `xswarm dashboard` | Both streams side by side, written to `dashboard.html` |
@@ -110,6 +111,21 @@ runner is meant to advance it.
 with the same shell for every unknown path, so the page must also mention the article's own
 path before the promos are released. If a page you can see in a browser is still refused, the
 host is not serving the prerendered head tags — `care promote <id> --force` overrides.
+
+Promoting also attaches the article's hero photograph to every promo and re-stamps their
+links, so the post carries the image the page shows and the reply carries two tagged links:
+the article, then the landing page for that article's audience (`provider` → `/providers`,
+`trainer` → `/trainers`, otherwise the home page). An article read with no route to a page
+with a form on it is attention that cannot be used, and a link posted without UTM parameters
+is unattributable forever — neither can be fixed after the post is out.
+
+## Measuring it
+
+`xswarm care scorecard` is one row per article, because the article is the unit that either
+compounds in search or does not. It pairs the technical read (`xswarm crawl`: indexable, in
+the sitemap, title/meta issues) with the X read (impressions and link clicks summed across
+that article's promos, and their ratio). Search Console and on-site conversion are missing
+columns rather than invented ones: connect the property and they can be filled in.
 
 ## Care stream
 

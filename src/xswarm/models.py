@@ -241,6 +241,10 @@ class Article(Base):
     status: Mapped[str] = mapped_column(String(20), default="drafted", index=True)
     editor_notes: Mapped[list[str]] = mapped_column(default=list)
     published_url: Mapped[str | None] = mapped_column(Text)
+    # The banner photograph on disk, so the promo posts can carry the same image the
+    # article page shows, and its alt text.
+    hero_path: Mapped[str] = mapped_column(Text, default="")
+    hero_alt: Mapped[str] = mapped_column(Text, default="")
     # The pull request on the site repo. Set when we open it, before anything is live.
     site_pr_url: Mapped[str | None] = mapped_column(Text)
     # Its branch, so edits made in the PR can be read back into this row.
