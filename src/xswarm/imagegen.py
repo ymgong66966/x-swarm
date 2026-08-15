@@ -28,6 +28,9 @@ CONSTRAINTS = (
     "not a photograph, not 3D chrome."
 )
 _SECTION = re.compile(r"^### (\w+)\s*$", re.MULTILINE)
+# Styles that define their own ground because they ship somewhere other than the
+# timeline: the always-applied near-black would read as a hole in the site's cream page.
+LIGHT_STYLES = {"site_hero"}
 
 
 class ArtSpec(BaseModel):
@@ -71,7 +74,8 @@ def build_prompt(spec: ArtSpec) -> str:
     block = style_block(spec.style)
     if block:
         parts.append(block)
-    parts.append(house_style())
+    if spec.style not in LIGHT_STYLES:
+        parts.append(house_style())
     parts.append(CONSTRAINTS)
     return "\n\n".join(part for part in parts if part)
 

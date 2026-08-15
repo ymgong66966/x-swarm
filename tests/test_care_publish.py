@@ -350,3 +350,29 @@ def test_is_live_treats_an_unreachable_host_as_not_live() -> None:
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     assert publish.is_live("https://alvernahealth.com/resources/x", client) == (False, 0)
+
+
+def test_placing_a_hero_shrinks_the_banner_without_changing_its_size(tmp_path) -> None:
+    """A 2 MB banner on an otherwise-text page is the slowest thing on it."""
+    from PIL import Image
+
+    source = tmp_path / "hero.png"
+    Image.effect_noise((600, 400), 90).convert("RGB").save(source)
+    target = tmp_path / "site" / "hero.png"
+    target.parent.mkdir()
+
+    publish._place_hero(source, target)
+
+    assert target.stat().st_size < source.stat().st_size
+    with Image.open(target) as shrunk:
+        assert shrunk.size == (600, 400)
+
+
+def test_a_hero_we_cannot_open_is_copied_through_rather_than_failing_the_publish(tmp_path) -> None:
+    source = tmp_path / "hero.png"
+    source.write_bytes(b"not really a png")
+    target = tmp_path / "hero-copy.png"
+
+    publish._place_hero(source, target)
+
+    assert target.read_bytes() == b"not really a png"

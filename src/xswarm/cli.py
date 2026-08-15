@@ -540,6 +540,9 @@ def care_publish_cmd(
     article_id: int,
     hero: str = typer.Option("", help="Image file to ship as the article's hero"),
     hero_alt: str = typer.Option("", help="Alt text for the hero image"),
+    illustrate: bool = typer.Option(
+        True, help="Draw a hero for the article when one was not supplied"
+    ),
     dry_run: bool = typer.Option(False, help="Render the file and stop; touch no git"),
     ready: bool = typer.Option(
         False, help="Open the PR ready for review instead of as a draft you still edit"
@@ -553,10 +556,19 @@ def care_publish_cmd(
         article = session.get(Article, article_id)
         if article is None:
             raise typer.BadParameter(f"no article {article_id}")
+        hero_path = Path(hero) if hero else None
+        if hero_path is None and illustrate and not dry_run:
+            drawn = illustrator.illustrate_article(article, LLM())
+            if drawn is None:
+                console.print("[yellow]no hero image[/yellow] — publishing without one")
+            else:
+                hero_path, generated_alt = drawn
+                hero_alt = hero_alt or generated_alt
+                console.print(f"hero {hero_path}")
         try:
             result = care_publish.publish(
                 article,
-                hero_path=Path(hero) if hero else None,
+                hero_path=hero_path,
                 hero_alt=hero_alt,
                 dry_run=dry_run,
                 draft=not ready,
