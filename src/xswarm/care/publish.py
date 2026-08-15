@@ -420,6 +420,11 @@ def publish(
         log.info("dry run: would open %s with %s", branch, content_path)
         return result
 
+    # Remembered so the promo posts can carry the same photograph the page shows.
+    if hero_path:
+        article.hero_path = str(hero_path)
+        article.hero_alt = hero_alt or article.title
+
     repo = ensure_checkout(repo_dir)
     _git(repo, "checkout", "-b", branch)
     target = repo / content_path

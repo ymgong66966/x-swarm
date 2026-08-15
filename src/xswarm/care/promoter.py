@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..llm import LLM, load_prompt
-from ..models import STREAM_CARE, Article, Draft
+from ..models import STREAM_CARE, Article, Asset, Draft
 from .editor import CLINICAL_DIRECTIVE_RE, banned_phrase_hits, promises_outcome
 
 log = logging.getLogger(__name__)
@@ -22,12 +24,115 @@ log = logging.getLogger(__name__)
 ANGLES = ["finding", "consequence", "objection"]
 TAKEAWAY_RE = re.compile(r"^- (.+)$", re.MULTILINE)
 BANNED_SOCIAL = ("#", "🧵", "🚨")
+# Where a reader of each audience should end up if the article did its job. The article
+# itself is not the destination: these are the pages with a form on them.
+LANDING_PATHS = {"provider": "/providers", "trainer": "/trainers", "caregiver": "/"}
+LANDING_LABELS = {
+    "provider": "How providers deliver and bill caregiver training",
+    "trainer": "Clinicians who teach these sessions",
+    "caregiver": "What Alverna does",
+}
+
+
+def tag(url: str, *, campaign: str, content: str, source: str = "x") -> str:
+    """Stamp an outbound link with UTM parameters.
+
+    Nothing reads these yet — site analytics is deliberately off. They cost nothing to
+    add and cannot be added retroactively: a link posted untagged in August is
+    unattributable forever, so every link ships tagged from the first post.
+    """
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query))
+    query.update(
+        {
+            "utm_source": source,
+            "utm_medium": "social",
+            "utm_campaign": campaign,
+            "utm_content": content,
+        }
+    )
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 def article_url(article: Article) -> str:
     if article.published_url:
         return article.published_url
     return f"{settings.care_blog_base_url.rstrip('/')}/{article.slug}"
+
+
+def landing_url(audience: str) -> str:
+    path = LANDING_PATHS.get(audience, "/")
+    return f"{settings.care_site_url.rstrip('/')}{path}"
+
+
+def link_reply(article: Article, *, channel: str, variant: int) -> str:
+    """The trailing reply of a promo: the article, then the page that can convert.
+
+    Links never go in the post itself — X suppresses reach on link posts — and the reply
+    carries two of them because an article read with no route to `/providers` or
+    `/trainers` is attention we cannot use.
+    """
+    content = f"{article.slug}-v{variant}"
+    source = "linkedin" if channel == "linkedin" else "x"
+    piece = tag(article_url(article), campaign="care_article", content=content, source=source)
+    landing = tag(
+        landing_url(article.audience), campaign="care_landing", content=content, source=source
+    )
+    label = LANDING_LABELS.get(article.audience, LANDING_LABELS["caregiver"])
+    return f"Full piece: {piece}\n\n{label}: {landing}"
+
+
+def hero_file(article: Article) -> Path | None:
+    """The banner photograph on disk, if it is still there to upload."""
+    if not article.hero_path:
+        return None
+    path = Path(article.hero_path)
+    return path if path.is_file() else None
+
+
+def attach_hero(session: Session, article: Article) -> int:
+    """Give every promo the article's own photograph.
+
+    The same image on the post and the page is the point: it is what a reader recognises
+    when the link opens, and a post with an image is not the same object on the timeline
+    as a post without one.
+    """
+    path = hero_file(article)
+    if path is None:
+        return 0
+    attached = 0
+    for draft in article.promos:
+        if any(asset.path == str(path) for asset in draft.assets):
+            continue
+        draft.assets.append(
+            Asset(
+                kind="hero",
+                path=str(path),
+                alt_text=article.hero_alt or article.title,
+                spec={"article_id": article.id},
+            )
+        )
+        attached += 1
+    session.flush()
+    return attached
+
+
+def release(session: Session, article: Article) -> int:
+    """Prepare an article's promos for scheduling, once its URL is real.
+
+    Re-stamps the links (the live URL may differ from the one guessed at write time) and
+    attaches the hero, then approves everything the editor cleared.
+    """
+    for draft in article.promos:
+        draft.link_reply = link_reply(
+            article, channel=str(draft.features.get("channel", "x")), variant=draft.variant
+        )
+    attach_hero(session, article)
+    approved = [d for d in article.promos if d.status == "ready_for_review"]
+    for draft in approved:
+        draft.status = "approved"
+    session.flush()
+    return len(approved)
 
 
 def _takeaways(article: Article) -> list[str]:
@@ -79,7 +184,6 @@ def write(article: Article, llm: LLM) -> list[Draft]:
     if not posts:
         posts = _fallback_posts(article)
 
-    link = article_url(article)
     drafts: list[Draft] = []
     for index, (body, angle) in enumerate(posts[: settings.care_promos_per_article]):
         drafts.append(
@@ -88,7 +192,7 @@ def write(article: Article, llm: LLM) -> list[Draft]:
                 stream=STREAM_CARE,
                 variant=index,
                 body=body,
-                link_reply=f"Full piece: {link}",
+                link_reply=link_reply(article, channel="x", variant=index),
                 features={
                     "hook_style": angle,
                     "pillar": article.pillar,
@@ -105,7 +209,7 @@ def write(article: Article, llm: LLM) -> list[Draft]:
                 stream=STREAM_CARE,
                 variant=len(drafts),
                 body=linkedin,
-                link_reply=link,
+                link_reply=link_reply(article, channel="linkedin", variant=len(drafts)),
                 features={
                     "hook_style": "linkedin",
                     "pillar": article.pillar,

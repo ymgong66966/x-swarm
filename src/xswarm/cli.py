@@ -25,7 +25,9 @@ from .agents import (
 )
 from .analytics import crawl, dashboard, traffic
 from .care import export as care_export
+from .care import promoter as care_promoter
 from .care import publish as care_publish
+from .care import scorecard as care_scorecard
 from .care import site as care_site
 from .care.graph import run_pipeline as run_care_pipeline
 from .config import settings
@@ -646,6 +648,35 @@ def care_status_cmd(check: bool = typer.Option(False, help="Also fetch each arti
     console.print(table)
 
 
+@care_app.command("scorecard")
+def care_scorecard_cmd() -> None:
+    """Per-article: findable by a crawler, and did X actually send anyone to the page.
+
+    Search Console columns are missing on purpose until the property is connected — an
+    empty column is information, an invented one is not.
+    """
+    init_db()
+    table = Table(title="care article scorecard")
+    columns = ("id", "slug", "status", "indexable", "sitemap", "promos", "impr", "clicks", "CTR")
+    for column in columns:
+        table.add_column(column)
+    with session_scope() as session:
+        for row in care_scorecard.build(session):
+            flag = {True: "yes", False: "[red]no[/red]", None: "—"}
+            table.add_row(
+                str(row.article_id),
+                row.slug,
+                row.status,
+                flag[row.indexable],
+                flag[row.in_sitemap],
+                f"{row.scheduled}/{row.promos} live",
+                str(row.impressions),
+                str(row.link_clicks),
+                f"{row.click_rate:.1%}" if row.impressions else "—",
+            )
+    console.print(table)
+
+
 @care_app.command("promote")
 def care_promote_cmd(
     article_id: int,
@@ -682,10 +713,8 @@ def care_promote_cmd(
             raise typer.Exit(1)
         article.published_url = url
         article.status = "published"
-        promos = [d for d in article.promos if d.status == "ready_for_review"]
-        for draft in promos:
-            draft.status = "approved"
-        console.print(f"{url} is live; approved {len(promos)} promo posts for scheduling")
+        approved = care_promoter.release(session, article)
+        console.print(f"{url} is live; approved {approved} promo posts for scheduling")
 
 
 @care_app.command("watch")
@@ -717,10 +746,7 @@ def care_watch_cmd(verbose: bool = False) -> None:
             if live:
                 article.published_url = url
                 article.status = "published"
-                promos = [d for d in article.promos if d.status == "ready_for_review"]
-                for draft in promos:
-                    draft.status = "approved"
-                promoted = f"approved {len(promos)}"
+                promoted = f"approved {care_promoter.release(session, article)}"
             table.add_row(
                 str(article.id),
                 article.slug,
