@@ -116,6 +116,7 @@ class Settings(BaseSettings):
             "risk_dark",
             "data_poster",
             "clinical_calm",
+            "site_hero",
             "concept_hero",
         ]
     )

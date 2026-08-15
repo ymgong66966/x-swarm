@@ -43,6 +43,16 @@ greys, the blue accent used sparingly. Objects and environments only — a doorw
 grab rail, a walker beside a chair, a tablet on a kitchen table — drawn with dignity and
 never with faces or medical drama. Use for caregiving, telehealth and policy posts.
 
+### site_hero
+The one light style, for headers of articles that ship on the Alverna site rather than
+into the timeline — a dark image inside that warm cream page would read as a hole. Warm
+off-white ground `#fbf9f5`, deep ink `#1b2430` linework, a calm teal accent `#1e7d8c`
+with one soft coral `#e88a6a` note, no glow. Same restraint as `clinical_calm`: objects
+and environments only, no faces, no medical drama, wide margins, roughly 3:1 landscape
+because the site crops it into a banner. Avoid subjects whose realism demands legible
+type — screens showing an interface, open documents, forms, signage: draw them blank,
+closed, or seen edge-on, or pick a different object entirely.
+
 ### concept_hero
 A single strong metaphor object rendered with care — a lens, a bridge, a key, a valve,
 a scaffold — floating in dark space with a soft accent rim. Use for opinion posts,

@@ -53,6 +53,14 @@ def test_prompt_carries_subject_style_and_the_no_text_constraint():
     assert "No text" in prompt
 
 
+def test_site_hero_drops_the_dark_ground_but_keeps_the_no_text_rule():
+    """A near-black banner inside the site's cream article page would read as a hole."""
+    prompt = imagegen.build_prompt(ArtSpec(style="site_hero", subject="A walker by a chair"))
+    assert "#fbf9f5" in prompt
+    assert "#0d1117" not in prompt
+    assert "No text" in prompt
+
+
 def test_dry_run_generates_nothing(tmp_path):
     llm = LLM(dry_run=True)
     assert imagegen.generate(ArtSpec(subject="x"), tmp_path / "a.png", llm) is None

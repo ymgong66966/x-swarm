@@ -8,6 +8,7 @@ plotting. Keeping them apart is what stops a model from inventing a chart.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..imagegen import ArtSpec, art_direction, generate
 from ..llm import LLM, load_prompt
-from ..models import STREAM_ML, Asset, Brief, Draft
+from ..models import STREAM_ML, Article, Asset, Brief, Draft
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +98,50 @@ def build_spec(draft: Draft, brief: Brief | None, llm: LLM) -> ArtSpec:
     if not spec.alt_text.strip():
         spec.alt_text = f"Abstract illustration: {spec.subject[:180]}"
     return spec
+
+
+def article_spec(article: Article, llm: LLM) -> ArtSpec:
+    """The banner for a site article. Same art director, but the style is pinned to the
+    one light look: the image sits inside the article page, not on the timeline."""
+    payload = llm.complete_json(
+        load_prompt("illustrator").format(
+            body=f"{article.title}\n\n{article.dek}\n\n{article.body_md[:4000]}",
+            whats_new=article.thesis or article.meta_description,
+            what_it_replaces="",
+            key_number="",
+            caveat="",
+            grounded_claims="\n".join(f"- {claim}" for claim in (article.evidence or [])[:12]),
+            art_direction=art_direction(),
+            styles="site_hero",
+        ),
+        strong=False,
+        max_tokens=700,
+        agent="illustrator_care",
+    )
+    spec = ArtSpec(style="site_hero")
+    if isinstance(payload, dict):
+        try:
+            spec = ArtSpec.model_validate({**payload, "style": "site_hero"})
+        except ValidationError as exc:
+            log.warning("art spec rejected for article %s: %s", article.id, exc.error_count())
+    if not spec.subject.strip():
+        spec.subject = (
+            "An abstract editorial illustration of the objects and environment behind: "
+            f"{article.title}"
+        )
+    if not spec.alt_text.strip():
+        spec.alt_text = f"Abstract illustration: {spec.subject[:180]}"
+    return spec
+
+
+def illustrate_article(article: Article, llm: LLM) -> tuple[Path, str] | None:
+    """Draw an article's hero. Returns the file and its alt text, or None when the image
+    provider is unavailable — an article without a banner is still publishable."""
+    spec = article_spec(article, llm)
+    path = settings.assets_dir / f"article-{article.id}-hero.png"
+    if generate(spec, path, llm, agent="illustrator_care") is None:
+        return None
+    return path, spec.alt_text
 
 
 def illustrate(session: Session, draft: Draft, llm: LLM) -> Asset | None:

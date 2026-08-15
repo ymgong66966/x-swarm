@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
+from PIL import Image
 
 from ..config import settings
 from ..models import Article
@@ -34,6 +35,7 @@ FAQ_HEADING = "## Frequently asked questions"
 SOURCES_HEADING = "## Sources"
 _FAQ_ENTRY = re.compile(r"^\*\*(?P<q>.+?)\*\*\s*\n+(?P<a>.+?)(?=\n\*\*|\Z)", re.DOTALL | re.M)
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_HERO_COLORS = 64
 
 
 class PublishError(RuntimeError):
@@ -309,6 +311,25 @@ def _hero_target(hero_path: Path, slug: str) -> str:
     return f"{settings.site_media_dir}/{slug}{suffix}"
 
 
+def _place_hero(source: Path, target: Path) -> None:
+    """Copy the hero into the site, shrinking flat illustration to a small palette.
+
+    The generator returns full-colour PNGs around 2 MB, which is a slow banner on a page
+    that is otherwise text. The art is flat vector-style, so a 64-colour palette is
+    visually identical at roughly a fifth of the bytes. Anything we cannot open is copied
+    through untouched rather than failing the publish.
+    """
+    if source.suffix.lower() != ".png":
+        shutil.copyfile(source, target)
+        return
+    try:
+        with Image.open(source) as image:
+            image.convert("RGB").quantize(colors=_HERO_COLORS).save(target, optimize=True)
+    except OSError as exc:
+        log.warning("could not shrink hero %s (%s) — copying as is", source, exc)
+        shutil.copyfile(source, target)
+
+
 def open_pull_request(branch: str, title: str, body: str, *, draft: bool = True) -> str:
     """Open the PR through the API when a token is configured; otherwise return "".
 
@@ -406,7 +427,7 @@ def publish(
     if hero_path and hero_target:
         media = repo / hero_target
         media.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(hero_path, media)
+        _place_hero(hero_path, media)
         paths.append(hero_target)
 
     _git(repo, "add", *paths)
