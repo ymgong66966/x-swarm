@@ -107,6 +107,25 @@ def test_dry_run_records_intent_without_calling_the_api(session, brief):
     assert draft.status == "approved"
 
 
+def test_a_dry_run_does_not_take_the_draft_out_of_later_real_runs(session, brief, monkeypatch):
+    """A dry run leaves a Publication with no provider id. Treating that as sent stranded
+    every draft rehearsed before the API key arrived."""
+    monkeypatch.setattr(settings, "typefully_api_key", "key")
+    draft = make_draft(brief, "the post")
+    draft.status = "approved"
+    session.add(draft)
+    session.flush()
+    publisher.publish(session, draft, dt.datetime(2026, 8, 20, 12, 30, tzinfo=dt.timezone.utc))
+    session.flush()
+
+    client = FakeClient()
+    monkeypatch.setattr(publisher, "TypefullyClient", lambda: client)
+    publications = publisher.run(session)
+
+    assert [p.draft_id for p in publications] == [draft.id]
+    assert publications[0].provider_draft_id == "tf-1"
+
+
 def test_run_only_schedules_approved_drafts(session, brief, monkeypatch):
     monkeypatch.setattr(settings, "typefully_api_key", None)
     approved = make_draft(brief, "approved post")
@@ -155,8 +174,9 @@ def test_resend_rewrites_the_queued_copy_without_moving_it(session, brief, tmp_p
     session.flush()
     when = dt.datetime(2026, 8, 20, 12, 30, tzinfo=dt.timezone.utc)
     session.add(
-        Publication(draft_id=draft.id, provider_draft_id="tf-9", scheduled_for=when,
-                    status="planned")
+        Publication(
+            draft_id=draft.id, provider_draft_id="tf-9", scheduled_for=when, status="planned"
+        )
     )
     session.flush()
 
