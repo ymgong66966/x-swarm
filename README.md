@@ -291,6 +291,19 @@ model costs $0 rather than a guess.
 migrated. A SQLite database created before Alembic existed has no version row and is missing
 the thread columns — recreate it rather than upgrading it.
 
+Moving an existing local database onto the shared Postgres is one pass, after `alembic
+upgrade head` has created the schema there:
+
+```bash
+.venv/bin/python scripts/copy_db.py sqlite:///xswarm.db "$XSWARM_DATABASE_URL"
+```
+
+It refuses a destination that already holds rows, because merging two histories of the
+same draft would post it twice, and it resets the Postgres sequences afterwards so the
+next insert does not collide with the copied ids. On Supabase the URL connects as a role
+of its own (`xswarm.<project-ref>`, the pooler wants `role.project-ref` as the username)
+into a schema of its own, so the tables sit beside the site's without reaching them.
+
 ## Evaluation
 
 `xswarm eval` runs the Writer, Composer and Editor over frozen briefs in
