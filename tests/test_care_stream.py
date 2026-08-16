@@ -486,6 +486,26 @@ def test_rewriting_promos_keeps_the_rows_that_own_a_queue_slot(session: Session)
     assert article.promos[0].publication.provider_draft_id == "tf-9"
 
 
+def test_one_blocked_promo_can_be_rewritten_without_disturbing_its_siblings(
+    session: Session,
+) -> None:
+    """When the rest of the set is queued and a human has read it, rewriting all of them to
+    fix the one the editor blocked costs more than it buys."""
+    article = make_article(session)
+    promoter.run(session, _StubLLM(), [article])
+    target, sibling = article.promos[1], article.promos[0]
+    before = sibling.body
+
+    class _NewVoice(_StubLLM):
+        def complete_json(self, prompt: str, **kwargs) -> dict:
+            return {"x_posts": [{"body": LONG_HANDOVER}], "linkedin": LONG_LINKEDIN}
+
+    changed = promoter.rewrite(session, article, _NewVoice(), only={target.id})
+
+    assert [d.id for d in changed] == [target.id]
+    assert sibling.body == before
+
+
 def test_rewriting_leaves_a_promo_that_already_went_out(session: Session) -> None:
     article = make_article(session)
     promoter.run(session, _StubLLM(), [article])
