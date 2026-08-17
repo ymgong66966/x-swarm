@@ -9,7 +9,8 @@ from conftest import make_draft
 
 from xswarm.agents import publisher
 from xswarm.config import settings
-from xswarm.models import Asset, Publication
+from xswarm.models import STREAM_CARE, STREAM_ML, Asset, Publication
+from xswarm.publishers import TypefullyError
 
 ET = ZoneInfo("America/New_York")
 
@@ -119,7 +120,8 @@ def test_a_dry_run_does_not_take_the_draft_out_of_later_real_runs(session, brief
     session.flush()
 
     client = FakeClient()
-    monkeypatch.setattr(publisher, "TypefullyClient", lambda: client)
+    monkeypatch.setattr(settings, "typefully_ml_social_set_id", "ml-set")
+    monkeypatch.setattr(publisher, "TypefullyClient", lambda **kwargs: client)
     publications = publisher.run(session)
 
     assert [p.draft_id for p in publications] == [draft.id]
@@ -216,3 +218,55 @@ def test_resend_refuses_a_draft_never_sent(session, brief):
     session.flush()
     with pytest.raises(ValueError, match="never sent"):
         publisher.resend(session, draft, client=FakeUpdateClient())
+
+
+def _two_accounts(monkeypatch):
+    monkeypatch.setattr(settings, "typefully_api_key", "key")
+    monkeypatch.setattr(settings, "typefully_social_set_id", None)
+    monkeypatch.setattr(settings, "typefully_care_social_set_id", "care-set")
+    monkeypatch.setattr(settings, "typefully_ml_social_set_id", "ml-set")
+
+
+def test_each_stream_posts_to_its_own_account(session, brief, monkeypatch):
+    """The healthcare promos are the Alverna account's; ML posts are not."""
+    _two_accounts(monkeypatch)
+    built = []
+    monkeypatch.setattr(
+        publisher,
+        "TypefullyClient",
+        lambda **kwargs: built.append(kwargs["social_set_id"]) or FakeClient(),
+    )
+    clients = publisher.StreamClients()
+
+    clients.get(STREAM_ML)
+    clients.get(STREAM_CARE)
+    clients.get(STREAM_ML)
+
+    assert built == ["ml-set", "care-set"]
+
+
+def test_an_unconfigured_account_is_refused_rather_than_sent_elsewhere(session, monkeypatch):
+    monkeypatch.setattr(settings, "typefully_api_key", "key")
+    monkeypatch.setattr(settings, "typefully_social_set_id", "care-set")
+    monkeypatch.setattr(settings, "typefully_care_social_set_id", None)
+    monkeypatch.setattr(settings, "typefully_ml_social_set_id", None)
+    clients = publisher.StreamClients()
+
+    assert clients.get(STREAM_CARE) is not None
+    with pytest.raises(TypefullyError, match="ml"):
+        clients.get(STREAM_ML)
+
+
+def test_run_leaves_a_draft_approved_when_its_account_is_missing(session, brief, monkeypatch):
+    monkeypatch.setattr(settings, "typefully_api_key", "key")
+    monkeypatch.setattr(settings, "typefully_social_set_id", None)
+    monkeypatch.setattr(settings, "typefully_care_social_set_id", "care-set")
+    monkeypatch.setattr(settings, "typefully_ml_social_set_id", None)
+    draft = make_draft(brief, "an ml post")
+    draft.status = "approved"
+    session.add(draft)
+    session.flush()
+
+    assert publisher.run(session) == []
+    assert draft.status == "approved"
+    assert draft.publication is None

@@ -83,3 +83,31 @@ def test_snapshots_accumulate_over_time(session, brief):
         captured_at=day1 + dt.timedelta(days=1),
     )
     assert [m.impressions for m in publication.metrics] == [100, 900]
+
+
+def test_metrics_are_pulled_from_every_account(session, brief, monkeypatch):
+    """Both timelines report separately, so reading one account would silently halve the
+    numbers the strategist learns from."""
+    from xswarm.config import settings
+
+    monkeypatch.setattr(settings, "typefully_api_key", "key")
+    monkeypatch.setattr(settings, "typefully_social_set_id", None)
+    monkeypatch.setattr(settings, "typefully_care_social_set_id", "care-set")
+    monkeypatch.setattr(settings, "typefully_ml_social_set_id", "ml-set")
+    _publication(session, brief, "care post", provider_draft_id="tf-care")
+    _publication(session, brief, "ml post", provider_draft_id="tf-ml", variant=1)
+    rows = {
+        "care-set": [{"draft_id": "tf-care", "post_id": "1", "impressions": 10}],
+        "ml-set": [{"draft_id": "tf-ml", "post_id": "2", "impressions": 20}],
+    }
+
+    class FakeClient:
+        def __init__(self, social_set_id):
+            self.social_set_id = social_set_id
+
+        def analytics_posts(self, start, end):
+            return rows[self.social_set_id]
+
+    monkeypatch.setattr(measurer, "TypefullyClient", FakeClient)
+
+    assert measurer.run(session) == 2

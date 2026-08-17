@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Draft, Publication
-from ..publishers import TypefullyClient
+from ..publishers import TypefullyClient, TypefullyError, social_set_for
 
 log = logging.getLogger(__name__)
 
@@ -174,6 +174,25 @@ def resend(
     return publication
 
 
+class StreamClients:
+    """One Typefully client per stream, so a draft can only reach its own X account.
+
+    A stream whose account is unconfigured raises, and the caller skips that draft rather
+    than posting it somewhere else: the healthcare account is not a fallback for ML posts.
+    """
+
+    def __init__(self, *, dry_run: bool = False) -> None:
+        self._off = dry_run or not settings.typefully_api_key
+        self._by_stream: dict[str, TypefullyClient] = {}
+
+    def get(self, stream: str) -> TypefullyClient | None:
+        if self._off:
+            return None
+        if stream not in self._by_stream:
+            self._by_stream[stream] = TypefullyClient(social_set_id=social_set_for(stream))
+        return self._by_stream[stream]
+
+
 def _unsent(draft: Draft) -> bool:
     """Whether the provider has never seen this draft.
 
@@ -214,12 +233,17 @@ def run(
         log.info("nothing approved to publish")
         return []
 
-    client = None if dry_run or not settings.typefully_api_key else TypefullyClient()
+    clients = StreamClients(dry_run=dry_run)
     slots = next_slots(len(approved), taken=queued_times(session))
-    publications = [
-        publish(session, draft, when, client=client, plan_only=plan_only)
-        for draft, when in zip(approved, slots, strict=False)
-    ]
+    publications = []
+    for draft, when in zip(approved, slots, strict=False):
+        try:
+            client = clients.get(draft.stream)
+        except TypefullyError as error:
+            # Leaves the draft approved and unsent, which is the safe half of the failure.
+            log.warning("skipping draft %s: %s", draft.id, error)
+            continue
+        publications.append(publish(session, draft, when, client=client, plan_only=plan_only))
     session.flush()
     log.info("scheduled %d posts", len(publications))
     return publications

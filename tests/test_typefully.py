@@ -6,7 +6,13 @@ import json
 import httpx
 import pytest
 
-from xswarm.publishers import TypefullyClient, TypefullyError
+from xswarm.models import STREAM_CARE, STREAM_ML, STREAM_OWN
+from xswarm.publishers import (
+    TypefullyClient,
+    TypefullyError,
+    configured_social_sets,
+    social_set_for,
+)
 
 
 def client(handler) -> TypefullyClient:
@@ -55,18 +61,42 @@ def test_publish_at_is_used_when_not_plan_only():
     )
 
 
-def test_social_set_is_discovered_when_unset():
-    def handler(request):
-        assert request.url.path.endswith("/social-sets")
-        return httpx.Response(200, json={"results": [{"id": "auto-1"}]})
+def test_an_unnamed_social_set_is_refused_rather_than_guessed(monkeypatch):
+    """Falling back to whichever account the workspace lists first is what put an ML
+    draft on the healthcare account once."""
+    from xswarm.config import settings
 
-    transport = httpx.MockTransport(handler)
-    discovered = TypefullyClient(
-        api_key="k",
-        social_set_id=None,
-        client=httpx.Client(transport=transport, base_url="https://api.typefully.com/v2"),
-    )
-    assert discovered.social_set_id == "auto-1"
+    monkeypatch.setattr(settings, "typefully_social_set_id", None)
+    bare = TypefullyClient(api_key="k", client=httpx.Client())
+    with pytest.raises(TypefullyError, match="no Typefully social set"):
+        _ = bare.social_set_id
+
+
+def test_streams_resolve_to_their_own_accounts(monkeypatch):
+    from xswarm.config import settings
+
+    monkeypatch.setattr(settings, "typefully_social_set_id", None)
+    monkeypatch.setattr(settings, "typefully_care_social_set_id", "care-set")
+    monkeypatch.setattr(settings, "typefully_ml_social_set_id", "ml-set")
+
+    assert social_set_for(STREAM_CARE) == "care-set"
+    assert social_set_for(STREAM_ML) == "ml-set"
+    # Your own material goes out under your own name.
+    assert social_set_for(STREAM_OWN) == "ml-set"
+    assert configured_social_sets() == ["care-set", "ml-set"]
+
+
+def test_the_pre_two_account_setting_still_names_the_care_account(monkeypatch):
+    from xswarm.config import settings
+
+    monkeypatch.setattr(settings, "typefully_social_set_id", "326727")
+    monkeypatch.setattr(settings, "typefully_care_social_set_id", None)
+    monkeypatch.setattr(settings, "typefully_ml_social_set_id", None)
+
+    assert social_set_for(STREAM_CARE) == "326727"
+    assert configured_social_sets() == ["326727"]
+    with pytest.raises(TypefullyError):
+        social_set_for(STREAM_ML)
 
 
 def test_analytics_follows_pagination():

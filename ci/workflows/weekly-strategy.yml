@@ -1,0 +1,41 @@
+name: weekly-strategy
+
+on:
+  schedule:
+    # Sunday 20:00 ET, after the week's posts have had 24h to accumulate metrics.
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  strategy:
+    runs-on: ubuntu-latest
+    env:
+      XSWARM_DATABASE_URL: ${{ secrets.XSWARM_DATABASE_URL }}
+      XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
+      XSWARM_ANTHROPIC_API_KEY: ${{ secrets.XSWARM_ANTHROPIC_API_KEY }}
+      XSWARM_TYPEFULLY_API_KEY: ${{ secrets.XSWARM_TYPEFULLY_API_KEY }}
+      XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID }}
+      XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - run: xswarm sync-metrics --days 14
+      - run: xswarm strategy --days 28
+      # The playbook change goes through review rather than straight to main: it is the
+      # file that steers every future post.
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          branch: strategy/weekly
+          title: "Weekly strategy update"
+          body: "Playbook rewritten from the last 28 days of post metrics."
+          commit-message: "strategy: weekly playbook update"
+          add-paths: |
+            playbook.md
+            strategy/
