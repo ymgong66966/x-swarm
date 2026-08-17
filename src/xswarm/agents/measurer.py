@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Draft, PostMetric, Publication
-from ..publishers import TypefullyClient
+from ..publishers import TypefullyClient, configured_social_sets
 
 log = logging.getLogger(__name__)
 
@@ -101,5 +101,8 @@ def run(
     days = days or settings.metrics_lookback_days
     end = dt.date.today()
     start = end - dt.timedelta(days=days)
-    client = client or TypefullyClient()
-    return ingest(session, client.analytics_posts(start, end))
+    if client is not None:
+        return ingest(session, client.analytics_posts(start, end))
+    # Posts live on two X accounts now, and each social set reports only its own.
+    clients = [TypefullyClient(social_set_id=s) for s in configured_social_sets()]
+    return sum(ingest(session, c.analytics_posts(start, end)) for c in clients)

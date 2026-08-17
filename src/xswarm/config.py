@@ -144,7 +144,12 @@ class Settings(BaseSettings):
 
     # Publishing (Typefully v2). Without a key the Publisher stays in dry-run.
     typefully_api_key: str | None = None
+    # One X account (Typefully "social set") per stream: healthcare promos post as Alverna,
+    # ML posts as you. Both live in the same workspace, so they share the API key.
+    # `typefully_social_set_id` is the pre-two-account name and still stands in for care.
     typefully_social_set_id: str | None = None
+    typefully_care_social_set_id: str | None = None
+    typefully_ml_social_set_id: str | None = None
     typefully_base_url: str = "https://api.typefully.com/v2"
     publish_timezone: str = "America/New_York"
     # Local-time slots the Publisher schedules into, in order.

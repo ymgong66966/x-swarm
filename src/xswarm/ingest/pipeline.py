@@ -22,7 +22,6 @@ from ..agents.illustrator import illustrate
 from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import STREAM_OWN, Asset, Draft, Publication
-from ..publishers import TypefullyClient
 from .fetch import IngestError, Material
 
 log = logging.getLogger(__name__)
@@ -212,5 +211,5 @@ def schedule(
     if draft.status != "approved":
         raise ValueError(f"draft {draft.id} is {draft.status}, not approved")
     slot = when or publisher.next_slots(1, taken=publisher.queued_times(session))[0]
-    client = None if dry_run or not settings.typefully_api_key else TypefullyClient()
+    client = publisher.StreamClients(dry_run=dry_run).get(draft.stream)
     return publisher.publish(session, draft, slot, client=client, plan_only=plan_only)

@@ -19,6 +19,7 @@ from pathlib import Path
 import httpx
 
 from ..config import settings
+from ..models import STREAM_CARE, STREAM_ML, STREAM_OWN
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,42 @@ MEDIA_TIMEOUT_S = 90.0
 
 class TypefullyError(RuntimeError):
     pass
+
+
+def social_set_for(stream: str) -> str:
+    """The X account a stream posts to.
+
+    Each stream is pinned to an account it may never leave: the healthcare promos belong
+    to the Alverna account and the ML posts to the personal one, and a draft whose account
+    is not configured is refused rather than sent to whichever account happens to be first
+    on the Typefully workspace.
+    """
+    care = settings.typefully_care_social_set_id or settings.typefully_social_set_id
+    configured = {
+        STREAM_CARE: care,
+        STREAM_ML: settings.typefully_ml_social_set_id,
+        # Material you hand in yourself goes out under your own name, like the ML posts.
+        STREAM_OWN: settings.typefully_ml_social_set_id,
+    }.get(stream)
+    if not configured:
+        raise TypefullyError(
+            f"no Typefully social set configured for the {stream!r} stream; set "
+            f"XSWARM_TYPEFULLY_{'CARE' if stream == STREAM_CARE else 'ML'}_SOCIAL_SET_ID"
+        )
+    return configured
+
+
+def configured_social_sets() -> list[str]:
+    """Every account this install posts to, deduplicated, in stream order."""
+    found: list[str] = []
+    for stream in (STREAM_CARE, STREAM_ML):
+        try:
+            social_set = social_set_for(stream)
+        except TypefullyError:
+            continue
+        if social_set not in found:
+            found.append(social_set)
+    return found
 
 
 class TypefullyClient:
@@ -54,14 +91,10 @@ class TypefullyClient:
 
     @property
     def social_set_id(self) -> str:
-        """Configured id, or the only one on the account."""
-        if self._social_set_id:
-            return self._social_set_id
-        payload = self._request("GET", "/social-sets")
-        sets = payload.get("results") or payload.get("social_sets") or []
-        if not sets:
-            raise TypefullyError("no social sets on this Typefully account")
-        self._social_set_id = str(sets[0]["id"])
+        """Never guessed: picking the first account on the workspace is how an ML post
+        ends up on the healthcare account."""
+        if not self._social_set_id:
+            raise TypefullyError("no Typefully social set given; pass social_set_for(<stream>)")
         return self._social_set_id
 
     def upload_media(self, path: Path) -> str:

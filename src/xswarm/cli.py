@@ -50,7 +50,7 @@ from .models import (
     Publication,
     SiteFact,
 )
-from .publishers.typefully import TypefullyClient
+from .publishers.typefully import TypefullyError
 
 app = typer.Typer(help="Agent swarm for an ML-frontier X account", no_args_is_help=True)
 care_app = typer.Typer(help="Care stream: healthcare articles and their promo posts")
@@ -340,7 +340,7 @@ def requeue_cmd(
     if not settings.typefully_api_key and not dry_run:
         console.print("[yellow]XSWARM_TYPEFULLY_API_KEY unset — dry run[/yellow]")
         dry_run = True
-    client = None if dry_run else TypefullyClient()
+    clients = publisher.StreamClients(dry_run=dry_run)
     table = Table("draft", "provider id", "media", "result")
     with session_scope() as session:
         if draft_ids:
@@ -356,9 +356,10 @@ def requeue_cmd(
             ]
         for draft in drafts:
             try:
+                client = clients.get(draft.stream)
                 publisher.resend(session, draft, client=client)
                 result = "[green]rewritten[/green]" if client else "dry run"
-            except ValueError as error:
+            except (ValueError, TypefullyError) as error:
                 result = f"[red]{error}[/red]"
             table.add_row(
                 str(draft.id),

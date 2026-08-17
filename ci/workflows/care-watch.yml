@@ -1,0 +1,44 @@
+name: care-watch
+
+# The unattended half of the article loop. `care watch` pulls whatever the reviewers
+# committed to the site pull request back into the database, and once the merged article
+# actually resolves on alvernahealth.com it releases that article's promo posts, which
+# `xswarm publish` then queues in Typefully as scheduled drafts.
+#
+# alverna-site sends `repository_dispatch: article-merged` the moment a merge to its main
+# touches content/resources/**; the schedule is a safety net for the deploy lag.
+
+on:
+  repository_dispatch:
+    types: [article-merged]
+  schedule:
+    - cron: "20 * * * *"
+  workflow_dispatch:
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    env:
+      XSWARM_DATABASE_URL: ${{ secrets.XSWARM_DATABASE_URL }}
+      XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
+      XSWARM_GITHUB_TOKEN: ${{ secrets.XSWARM_SITE_TOKEN }}
+      XSWARM_TYPEFULLY_API_KEY: ${{ secrets.XSWARM_TYPEFULLY_API_KEY }}
+      XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID }}
+      XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      # The site repo is private to this org, so clone it with a token that can read it.
+      - name: Point the site checkout at an authenticated remote
+        run: |
+          echo "XSWARM_SITE_REPO_URL=https://x-access-token:${{ secrets.XSWARM_SITE_TOKEN }}@github.com/alverna-health/alverna-site.git" >> "$GITHUB_ENV"
+          echo "XSWARM_SITE_REPO_DIR=${{ runner.temp }}/alverna-site" >> "$GITHUB_ENV"
+      - name: Sync edits and promote merged articles
+        run: xswarm care watch
+      # Only ever schedules drafts a human approved, and only as plan_at.
+      - name: Queue approved posts
+        if: ${{ env.XSWARM_TYPEFULLY_API_KEY != '' }}
+        run: xswarm publish

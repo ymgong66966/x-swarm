@@ -254,6 +254,14 @@ review. Slots come from `XSWARM_PUBLISH_SLOTS` with ±7 min of jitter, skipping 
 45 minutes of something already queued. The link reply is posted as the second post in the
 thread. Without `XSWARM_TYPEFULLY_API_KEY` the Publisher records intent and stops.
 
+Each stream posts to its own X account, chosen by `draft.stream`, never by asking Typefully
+which accounts exist: `care` goes to `XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID` (the Alverna
+account) and `ml` / `own` to `XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID` (the personal account). Both
+live in one workspace and share the API key. A draft whose stream has no social set configured
+is skipped and stays `approved` — the other account is not a fallback, since that is how an ML
+post lands on the healthcare timeline. `sync-metrics` reads analytics from each configured
+account in turn.
+
 ## Measurement and learning
 
 `xswarm sync-metrics` pulls per-post X analytics from Typefully and stores a **time series** of
