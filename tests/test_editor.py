@@ -130,3 +130,9 @@ def test_reading_a_paper_in_first_person_is_allowed(brief):
         "and only on one benchmark subset.",
     )
     assert deterministic_checks(draft, brief, []) == []
+
+
+def test_an_em_dash_is_enough_to_block(brief):
+    """One is the tell; the account writes with periods and commas."""
+    draft = make_draft(brief, "Speculative tool calls — 3.2x lower end-to-end latency.")
+    assert any("em dash" in note for note in deterministic_checks(draft, brief, []))

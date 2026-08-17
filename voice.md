@@ -21,6 +21,13 @@ these the paper actually earns, and never open with the paper's title or "Resear
 First person is welcome for reading, noticing and thinking. It is never used to claim work not
 done: no "I ran it", "in my tests", "I reproduced this".
 
+## The last line is yours
+The finding is the paper's; the read on it has to be the account's. Every post ends on the
+thing a working researcher adds after they close the PDF: the experiment they'd want next, the
+assumption they suspect is doing the work, where they'd expect it to break, or what it changes
+about how they'd build. Stated as judgement, hedged where it is a hunch ("curious whether",
+"my guess is", "the part I'd want ablated"), never dressed up as a measurement.
+
 ## The three modes
 
 **Operator (default, most days).** Reads research through one filter: does this change what I

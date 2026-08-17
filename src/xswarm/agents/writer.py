@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,13 @@ from ..models import Brief, Draft
 log = logging.getLogger(__name__)
 
 HOOK_STYLES = ["curious", "number", "claim", "contrarian"]
+DASH_RE = re.compile(r" *(?:[—–]|(?<= )--(?= )) *")
+
+
+def _typography(body: str) -> str:
+    """The em dash is the single most recognisable tell of a generated post, and the model
+    reaches for it however the prompt is worded. Swapping it out changes no words."""
+    return DASH_RE.sub(", ", body).strip()
 
 
 def _read(path) -> str:
@@ -66,7 +74,7 @@ def write(brief: Brief, llm: LLM, voice: str, playbook: str, recent: str = "") -
                 Draft(
                     brief_id=brief.id,
                     variant=index,
-                    body=str(variant.get("body", "")).strip(),
+                    body=_typography(str(variant.get("body", ""))),
                     link_reply=link_reply,
                     alt_text=str(variant.get("alt_text", "")).strip(),
                     features={

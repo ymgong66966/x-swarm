@@ -106,8 +106,8 @@ def deterministic_checks(draft: Draft, brief: Brief | None, recent_bodies: list[
                 notes.append(f"banned phrase in {label}: {phrase!r}")
         if FIRSTHAND_RE.search(post):
             notes.append(f"{label} claims first-hand experience the brief cannot support")
-        if post.count("—") > 1:
-            notes.append(f"em-dash cadence in {label} reads as LLM output")
+        if "—" in post:
+            notes.append(f"em dash in {label} reads as LLM output; use a period or a comma")
         for number in set(NUMBER_RE.findall(post)):
             if number not in grounding:
                 notes.append(f"number {number!r} in {label} is not present in the brief")
