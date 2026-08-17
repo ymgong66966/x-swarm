@@ -350,11 +350,12 @@ the shared Postgres, since a runner cannot advance state that lives in a local S
 | `ci.yml` | pull requests | tests and lint |
 
 `care-weekly` writes articles; it deliberately holds no site token, so approving an article and
-opening its pull request stay manual (`care approve`, `care publish`). It currently sits in
-`ci/workflows/` and **must be moved to `.github/workflows/` to run**: pushing a workflow file
-needs the `workflow` OAuth scope, so move it with a commit from your own machine or paste it
-into the GitHub UI. Every schedule is UTC, so the ET times above shift by an hour outside
-daylight time.
+opening its pull request stay manual (`care approve`, `care publish`). Every schedule is UTC, so
+the ET times above shift by an hour outside daylight time.
+
+Edits to any of these files may land in `ci/workflows/` first, because pushing under
+`.github/workflows/` needs the `workflow` OAuth scope; copy them across with a commit from your
+own machine when that happens.
 
 ## Tests
 
