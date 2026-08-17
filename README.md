@@ -330,10 +330,23 @@ ships. Dry-run mode scores the deterministic fallbacks; with a key it scores the
 
 ## Workflows
 
-`ci/workflows/` holds `ci.yml`, `daily.yml`, and `weekly-strategy.yml`. **They must be moved to
-`.github/workflows/` to run** — they were parked here because pushing them requires the
-`workflow` OAuth scope. Move them with a normal commit from your own machine, or paste them
-into the GitHub UI.
+`.github/workflows/` holds the schedules. All of them need `XSWARM_DATABASE_URL` pointing at
+the shared Postgres, since a runner cannot advance state that lives in a local SQLite file.
+
+| workflow | when | what it does |
+| --- | --- | --- |
+| `daily.yml` | daily, 06:15 ET | ML stream: `xswarm run`, then queue already-approved drafts and sync metrics |
+| `care-weekly.yml` | Monday, 07:00 ET | care stream: `xswarm care run` and nothing else — the week's articles land as drafts for review |
+| `care-watch.yml` | hourly, and on `article-merged` from alverna-site | sync your PR edits back, and release promos for articles that are actually live |
+| `weekly-strategy.yml` | Sunday, 20:00 ET | re-read the metrics and update the strategy |
+| `ci.yml` | pull requests | tests and lint |
+
+`care-weekly` writes articles; it deliberately holds no site token, so approving an article and
+opening its pull request stay manual (`care approve`, `care publish`). It currently sits in
+`ci/workflows/` and **must be moved to `.github/workflows/` to run**: pushing a workflow file
+needs the `workflow` OAuth scope, so move it with a commit from your own machine or paste it
+into the GitHub UI. Every schedule is UTC, so the ET times above shift by an hour outside
+daylight time.
 
 ## Tests
 
