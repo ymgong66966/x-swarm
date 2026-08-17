@@ -6,6 +6,7 @@ import re
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from .. import figures
 from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import Asset, Brief, Draft
@@ -15,6 +16,9 @@ from .illustrator import illustrate
 log = logging.getLogger(__name__)
 
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?")
+# Templates that carry measured values. A concept diagram drawn from an abstract looks
+# like an explanation without being one, so it is not among them.
+DATA_TEMPLATES = frozenset({"result_chart", "comparison_table", "number_card"})
 
 
 def _fallback_spec(draft: Draft, brief: Brief) -> VisualSpec:
@@ -73,9 +77,14 @@ def build_spec(draft: Draft, brief: Brief, llm: LLM) -> VisualSpec:
     return spec
 
 
-def visualize(session: Session, draft: Draft, llm: LLM) -> Asset:
+def visualize(
+    session: Session, draft: Draft, llm: LLM, allowed: frozenset[str] | None = None
+) -> Asset | None:
     brief = draft.brief
     spec = build_spec(draft, brief, llm)
+    if allowed is not None and spec.template not in allowed:
+        log.info("draft %s ships text-only: %s says nothing", draft.id, spec.template)
+        return None
     path = settings.assets_dir / f"draft-{draft.id}-{spec.template}.png"
     render(spec, path)
     asset = Asset(
@@ -98,20 +107,48 @@ def has_plottable_data(brief: Brief) -> bool:
     return bool(brief.key_number and NUMBER_RE.search(brief.key_number))
 
 
-def attach_visual(session: Session, draft: Draft, llm: LLM) -> Asset | None:
-    """One image per draft, chosen by `visual_mode`. Generated art is attempted first
-    only where there is no data to plot, and a failed generation falls back to a rendered
-    card — except for briefless drafts, which have nothing for the templates to draw."""
+def attach_figure(session: Session, draft: Draft, llm: LLM) -> Asset | None:
+    """The authors' own figure, which explains the method better than anything drawn
+    from an abstract can."""
     brief = draft.brief
-    generated = settings.visual_mode == "generate" or (
-        settings.visual_mode == "auto" and brief is not None and not has_plottable_data(brief)
+    # A dry run reaches nothing outside the process, so it renders a card instead.
+    if brief is None or llm.dry_run:
+        return None
+    item = brief.candidate.item
+    figure = figures.fetch(item.url, settings.assets_dir / f"draft-{draft.id}-figure.png")
+    if figure is None:
+        return None
+    caption = figure.caption or f"Figure from {item.title}"
+    asset = Asset(
+        draft_id=draft.id,
+        kind="paper_figure",
+        path=str(figure.path),
+        alt_text=caption[:400],
+        spec={"caption": figure.caption, "source_url": figure.source_url},
     )
-    if generated:
+    session.add(asset)
+    draft.alt_text = asset.alt_text
+    return asset
+
+
+def attach_visual(session: Session, draft: Draft, llm: LLM) -> Asset | None:
+    """One image per draft, and only when it says something. In `auto`, the paper's own
+    figure comes first, a chart is rendered when there are real numbers to plot, and a
+    post with neither ships text-only rather than with a diagram a model imagined."""
+    brief = draft.brief
+    if settings.visual_mode == "generate":
         asset = illustrate(session, draft, llm)
         if asset is not None:
             return asset
     if brief is None:
         return None
+    if settings.visual_mode == "auto":
+        asset = attach_figure(session, draft, llm)
+        if asset is not None:
+            return asset
+        if not has_plottable_data(brief):
+            return None
+        return visualize(session, draft, llm, allowed=DATA_TEMPLATES)
     return visualize(session, draft, llm)
 
 

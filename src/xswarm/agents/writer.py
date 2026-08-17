@@ -11,7 +11,7 @@ from ..models import Brief, Draft
 
 log = logging.getLogger(__name__)
 
-HOOK_STYLES = ["claim", "number", "contrarian"]
+HOOK_STYLES = ["curious", "number", "claim", "contrarian"]
 
 
 def _read(path) -> str:
@@ -70,7 +70,9 @@ def write(brief: Brief, llm: LLM, voice: str, playbook: str, recent: str = "") -
                     link_reply=link_reply,
                     alt_text=str(variant.get("alt_text", "")).strip(),
                     features={
-                        "hook_style": variant.get("hook_style", HOOK_STYLES[index % 3]),
+                        "hook_style": variant.get(
+                            "hook_style", HOOK_STYLES[index % len(HOOK_STYLES)]
+                        ),
                         "pillar": brief.candidate.pillar,
                         "visual_hint": brief.visual_hint,
                     },
@@ -93,6 +95,35 @@ def write(brief: Brief, llm: LLM, voice: str, playbook: str, recent: str = "") -
                 )
             )
     return drafts
+
+
+def rewrite(session: Session, draft: Draft, llm: LLM) -> Draft:
+    """Write a draft again from its brief, in place.
+
+    The row survives, so a draft already sitting on the Typefully queue keeps its slot
+    and provider id and can be pushed over with `xswarm requeue`. Used when the voice
+    rules change under a post that was written by the older ones.
+    """
+    brief = draft.brief
+    if brief is None:
+        raise ValueError(f"draft {draft.id} has no brief to write from")
+    variants = write(
+        brief,
+        llm,
+        _read(settings.voice_path),
+        _read(settings.playbook_path),
+        memory.writer_context(session),
+    )
+    fresh = next((v for v in variants if v.body.strip()), None)
+    if fresh is None:
+        raise ValueError(f"draft {draft.id} came back empty")
+    draft.body = fresh.body
+    draft.alt_text = fresh.alt_text
+    draft.link_reply = fresh.link_reply
+    draft.thread = []
+    draft.features = {**(draft.features or {}), **fresh.features}
+    session.flush()
+    return draft
 
 
 def run(session: Session, llm: LLM, briefs: list[Brief]) -> list[Draft]:

@@ -114,3 +114,19 @@ def test_allows_word_numbers_that_are_in_the_brief(brief):
 def test_blocks_a_bare_ungrounded_multiplier(brief):
     draft = make_draft(brief, "The rewrite gives double the throughput.", alt_text="chart")
     assert any("not present in the brief" in n for n in deterministic_checks(draft, brief, []))
+
+
+def test_a_digest_opening_is_blocked(brief):
+    """ "This paper presents..." is what a summariser writes; the account shares finds."""
+    draft = make_draft(brief, "This paper presents 3.2x lower end-to-end latency.")
+    notes = deterministic_checks(draft, brief, [])
+    assert any("digest entry" in note for note in notes)
+
+
+def test_reading_a_paper_in_first_person_is_allowed(brief):
+    draft = make_draft(
+        brief,
+        "Spent the morning on this one: 3.2x lower end-to-end latency, "
+        "and only on one benchmark subset.",
+    )
+    assert deterministic_checks(draft, brief, []) == []

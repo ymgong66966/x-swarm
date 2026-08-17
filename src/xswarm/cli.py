@@ -255,6 +255,52 @@ def ingest_schedule_cmd(
         )
 
 
+@app.command("rewrite")
+def rewrite_cmd(
+    draft_ids: list[int] = typer.Argument(..., help="Drafts to write again from their brief"),
+    revisual: bool = typer.Option(True, help="Also pick the image again"),
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Write drafts again under the current voice rules, keeping their rows.
+
+    For posts written before a rule changed. A draft already on the Typefully queue keeps
+    its slot and provider id, so `xswarm requeue` pushes the new copy over the old one.
+    """
+    _setup_logging(verbose)
+    init_db()
+    llm = LLM(dry_run=dry_run)
+    with session_scope() as session:
+        table = Table("draft", "status", "chars", "visual", "post")
+        for did in draft_ids:
+            draft = session.get(Draft, did)
+            if draft is None:
+                raise typer.BadParameter(f"no draft {did}")
+            writer.rewrite(session, draft, llm)
+            if revisual:
+                for asset in list(draft.assets):
+                    session.delete(asset)
+                session.flush()
+            editor.run(session, llm, [draft])
+            if revisual:
+                asset = visualizer.attach_visual(session, draft, llm)
+            else:
+                # Alt text describes the image that is actually attached, never the one
+                # the writer imagined while rewriting the copy.
+                asset = draft.assets[0] if draft.assets else None
+                draft.alt_text = asset.alt_text if asset else ""
+            table.add_row(
+                str(draft.id),
+                draft.status,
+                str(len(draft.body)),
+                asset.kind if asset else "none",
+                draft.body.replace("\n", " ⏎ ")[:90],
+            )
+        costs.record(session, llm)
+        console.print(table)
+        console.print("queued drafts still show the old copy until [bold]xswarm requeue[/bold]")
+
+
 @app.command("render")
 def render_cmd(draft_id: list[int] = typer.Option(None), dry_run: bool = False) -> None:
     """Render (or re-render) the visual for specific drafts."""

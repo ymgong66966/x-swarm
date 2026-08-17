@@ -22,7 +22,17 @@ Claims you may make:
 
 RULES
 - Max {max_chars} characters. Shorter usually wins.
-- The first 8 words must earn the scroll-stop. No throat-clearing, no "Interesting paper:".
+- You are one researcher telling another what you just read and why you kept reading. Not a
+  digest, not an announcement. Somebody specific is behind this post.
+- The first line is the hook and has one job: make a reader want the second line. It may be
+  the surprise in first person ("Spent the morning on this one and the result is not what I
+  expected"), the number that shouldn't be possible, the question the paper answers, or the
+  belief it breaks. Never open with the paper's title, "This paper", "Researchers propose",
+  "The authors show", or "Interesting paper:".
+- Whatever the hook promises, the next sentence pays off with the actual finding. Excitement
+  that is not immediately cashed out in a result reads as bait.
+- First person is encouraged for reading, noticing and wanting to know more. It is never used
+  to claim work not done: no "I ran it", "in my tests", "I reproduced this".
 - Say something. A summary with no opinion is a wasted post.
 - Never state a number that is not in the brief. Never name a method the brief did not name.
 - Never claim first-hand experience the brief cannot support: no "I ran it", "in my tests",
@@ -34,7 +44,8 @@ RULES
 - Enthusiasm is allowed and encouraged, but it must be quantified in the same breath: say what
   is good about the method or result and back it with a number from the brief.
 - Each variant uses a different hook_style: "claim" (assert the takeaway), "number" (lead with
-  the key metric), "contrarian" (lead with the caveat or what everyone gets wrong).
+  the key metric), "contrarian" (lead with the caveat or what everyone gets wrong), "curious"
+  (open on what surprised you while reading, then the finding).
 - `alt_text` describes the planned visual for screen readers in one sentence.
 
 Reply with a JSON array only:
