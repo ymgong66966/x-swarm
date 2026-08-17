@@ -23,7 +23,8 @@ jobs:
       XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
       XSWARM_GITHUB_TOKEN: ${{ secrets.XSWARM_SITE_TOKEN }}
       XSWARM_TYPEFULLY_API_KEY: ${{ secrets.XSWARM_TYPEFULLY_API_KEY }}
-      XSWARM_TYPEFULLY_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_SOCIAL_SET_ID }}
+      XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID }}
+      XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
