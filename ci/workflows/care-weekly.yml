@@ -1,0 +1,46 @@
+name: care-weekly
+
+# Writes the week's healthcare articles and stops there. Nothing here approves an article,
+# opens a pull request on alverna-site, or touches Typefully: `care approve` and
+# `care publish` stay in human hands, and this job is deliberately given no token that
+# could write to the site repo.
+#
+# Monday morning ET, so the week starts with drafts already waiting for review.
+
+on:
+  schedule:
+    # 07:00 ET (11:00 UTC while ET is on daylight time, as with daily-swarm).
+    - cron: "0 11 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip all model calls"
+        type: boolean
+        default: false
+
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    env:
+      XSWARM_DATABASE_URL: ${{ secrets.XSWARM_DATABASE_URL }}
+      XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
+      XSWARM_ANTHROPIC_API_KEY: ${{ secrets.XSWARM_ANTHROPIC_API_KEY }}
+      # Wider than the 80 columns rich assumes off a terminal, so titles are readable.
+      COLUMNS: "160"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - name: Write this week's articles
+        run: xswarm care run ${{ inputs.dry_run && '--dry-run' || '' }}
+      # So the run page itself says what is waiting for a human, without opening a terminal.
+      - name: Summarise what needs review
+        if: always()
+        run: |
+          {
+            echo '```'
+            xswarm care status || echo "care status failed; see the log above"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -9,7 +9,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from .config import settings
 from .models import Base
 
-_engine = create_engine(settings.database_url, future=True)
+
+def engine_url(url: str) -> str:
+    """Supabase and friends hand out `postgresql://`, which SQLAlchemy reads as psycopg2;
+    psycopg 3 is the driver we actually depend on, so name it."""
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url
+
+
+_engine = create_engine(engine_url(settings.database_url), future=True)
 SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
 
