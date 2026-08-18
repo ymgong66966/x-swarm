@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from conftest import make_draft
 
+from xswarm import figures
 from xswarm.agents import visualizer
 from xswarm.config import settings
 from xswarm.llm import LLM
@@ -77,3 +78,50 @@ def test_only_one_variant_per_brief_is_rendered(session, brief, tmp_path, monkey
     assets = visualizer.run(session, LLM(dry_run=True), drafts)
     assert len(assets) == 1
     assert assets[0].draft_id == next(d.id for d in drafts if d.variant == 0)
+
+
+def test_the_papers_own_figure_beats_anything_we_could_draw(session, brief, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "assets_dir", tmp_path)
+    monkeypatch.setattr(settings, "visual_mode", "auto")
+
+    def fake_fetch(url, dest, **kwargs):
+        dest.write_bytes(b"png")
+        return figures.Figure(path=dest, caption="Figure 1: Overview.", source_url=url)
+
+    monkeypatch.setattr(figures, "fetch", fake_fetch)
+    draft = make_draft(brief, "body")
+    session.add(draft)
+    session.flush()
+    asset = visualizer.attach_visual(session, draft, FakeLLM({}))
+    assert asset.kind == "paper_figure"
+    assert draft.alt_text == "Figure 1: Overview."
+
+
+def test_a_post_with_no_figure_and_no_numbers_ships_without_an_image(
+    session, brief, tmp_path, monkeypatch
+):
+    """An invented diagram reads as an explanation without being one, so it is not offered."""
+    monkeypatch.setattr(settings, "assets_dir", tmp_path)
+    monkeypatch.setattr(settings, "visual_mode", "auto")
+    monkeypatch.setattr(figures, "fetch", lambda url, dest, **kwargs: None)
+    brief.key_number = ""
+    brief.visual_hint = "concept_diagram"
+    draft = make_draft(brief, "body")
+    session.add(draft)
+    session.flush()
+    assert visualizer.attach_visual(session, draft, FakeLLM({})) is None
+
+
+def test_a_diagram_is_refused_even_when_the_brief_has_a_number(
+    session, brief, tmp_path, monkeypatch
+):
+    """The number earns a chart, not a flowchart the model imagined around it."""
+    monkeypatch.setattr(settings, "assets_dir", tmp_path)
+    monkeypatch.setattr(settings, "visual_mode", "auto")
+    monkeypatch.setattr(figures, "fetch", lambda url, dest, **kwargs: None)
+    brief.key_number = "3.2x lower latency"
+    draft = make_draft(brief, "body")
+    session.add(draft)
+    session.flush()
+    llm = FakeLLM({"template": "concept_diagram", "stages": ["a", "b"], "title": "How it works"})
+    assert visualizer.attach_visual(session, draft, llm) is None

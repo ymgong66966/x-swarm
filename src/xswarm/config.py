@@ -110,8 +110,9 @@ class Settings(BaseSettings):
     visual_width_px: int = 1600
     visual_height_px: int = 900
     # "render" = deterministic matplotlib only; "generate" = text-to-image only;
-    # "auto" = a chart whenever there are real numbers to plot, generated art otherwise,
-    # so a model never draws a data visual it could get wrong.
+    # "auto" = the paper's own figure first, then a chart when there are real numbers to
+    # plot, and no image at all otherwise. A diagram invented from an abstract looks like
+    # an explanation without being one, so it is never the answer here.
     visual_mode: str = "auto"
     image_model: str = "gpt-image-1"
     image_size: str = "1536x1024"

@@ -44,6 +44,14 @@ FIRSTHAND_RE = re.compile(
     r"|\b(?:my|our) (?:tests?|testing|experiments?|benchmarks?|runs?)\b",
     re.IGNORECASE,
 )
+# Openings that announce a paper instead of sharing a find. They are what an abstract
+# summariser writes, and they are the difference between a post and a digest entry.
+DIGEST_OPENING_RE = re.compile(
+    r"^\s*(?:this (?:paper|work|study)|the (?:paper|authors|study)|researchers?\b|"
+    r"scientists\b|a new (?:paper|method|model|benchmark)|new (?:paper|research)\b|"
+    r"interesting paper)",
+    re.IGNORECASE,
+)
 DUPLICATE_THRESHOLD = 85
 
 
@@ -98,14 +106,17 @@ def deterministic_checks(draft: Draft, brief: Brief | None, recent_bodies: list[
                 notes.append(f"banned phrase in {label}: {phrase!r}")
         if FIRSTHAND_RE.search(post):
             notes.append(f"{label} claims first-hand experience the brief cannot support")
-        if post.count("—") > 1:
-            notes.append(f"em-dash cadence in {label} reads as LLM output")
+        if "—" in post:
+            notes.append(f"em dash in {label} reads as LLM output; use a period or a comma")
         for number in set(NUMBER_RE.findall(post)):
             if number not in grounding:
                 notes.append(f"number {number!r} in {label} is not present in the brief")
         for phrase in set(WORD_NUMBER_RE.findall(post)):
             if phrase.lower() not in grounding.lower():
                 notes.append(f"number {phrase!r} in {label} is not present in the brief")
+
+    if DIGEST_OPENING_RE.match(body):
+        notes.append("opens like a digest entry; lead with the find, not with the paper")
 
     lowered = body.lower()
     for claim in (brief.unverified_claims if brief else []) or []:
