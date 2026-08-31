@@ -6,7 +6,16 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from .agents import analyst, composer, curator, editor, scout, visualizer, writer
+from .agents import (
+    analyst,
+    composer,
+    curator,
+    editor,
+    researcher,
+    scout,
+    visualizer,
+    writer,
+)
 from .db import init_db, session_scope
 from .models import STREAM_ML
 from .pipeline import _last, finish_run, make_llm, spend, start_run
@@ -43,6 +52,16 @@ def curator_node(state: PipelineState) -> PipelineState:
             "candidate_ids": [c.id for c in candidates],
             "cost_usd": spend(session, llm, state),
         }
+
+
+def researcher_node(state: PipelineState) -> PipelineState:
+    from .models import Candidate
+
+    with session_scope() as session:
+        llm = make_llm(state)
+        candidates = [session.get(Candidate, cid) for cid in state["candidate_ids"]]
+        researcher.run(session, llm, [c for c in candidates if c])
+        return {"cost_usd": spend(session, llm, state)}
 
 
 def analyst_node(state: PipelineState) -> PipelineState:
@@ -102,6 +121,7 @@ def build_graph():
     graph = StateGraph(PipelineState)
     graph.add_node("scout", scout_node)
     graph.add_node("curator", curator_node)
+    graph.add_node("researcher", researcher_node)
     graph.add_node("analyst", analyst_node)
     graph.add_node("writer", writer_node)
     graph.add_node("composer", composer_node)
@@ -110,7 +130,8 @@ def build_graph():
 
     graph.add_edge(START, "scout")
     graph.add_edge("scout", "curator")
-    graph.add_edge("curator", "analyst")
+    graph.add_edge("curator", "researcher")
+    graph.add_edge("researcher", "analyst")
     graph.add_edge("analyst", "writer")
     # Threads are expanded before the gate so the Editor checks every post, not just the
     # opener.

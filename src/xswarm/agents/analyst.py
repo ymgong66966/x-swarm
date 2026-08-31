@@ -33,15 +33,34 @@ def _fallback_brief(candidate: Candidate) -> Brief:
     )
 
 
+def _research_context(candidate: Candidate) -> str:
+    """Extract research context gathered by the Researcher, if any."""
+    ctx = (candidate.item.signals or {}).get("research_context", {})
+    parts: list[str] = []
+    # Autonomous agent summary (tool-use mode)
+    if ctx.get("research_summary"):
+        parts.append(f"DEEP RESEARCH:\n{ctx['research_summary']}")
+    # Fallback raw content (dry-run mode)
+    if ctx.get("pdf_raw"):
+        parts.append(f"PAPER TEXT (excerpt):\n{ctx['pdf_raw']}")
+    if ctx.get("repo_raw"):
+        parts.append(f"REPOSITORY CONTENTS (excerpt):\n{ctx['repo_raw']}")
+    return "\n\n".join(parts)
+
+
 def analyze(candidate: Candidate, llm: LLM) -> Brief:
     item = candidate.item
+    research = _research_context(candidate)
+    content = item.summary[:6000]
+    if research:
+        content += "\n\n--- DEEP RESEARCH ---\n" + research[:12000]
     payload = llm.complete_json(
         load_prompt("analyst").format(
             title=item.title,
             authors=", ".join(item.authors[:8]),
             source=item.source,
             url=item.url,
-            summary=item.summary[:6000],
+            summary=content,
             signals=item.signals,
         ),
         strong=True,
