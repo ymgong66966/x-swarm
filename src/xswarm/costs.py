@@ -20,13 +20,20 @@ from .models import ModelCall
 log = logging.getLogger(__name__)
 
 
-def record(session: Session, llm: LLM, *, run_date: dt.date | None = None) -> float:
+def record(
+    session: Session,
+    llm: LLM,
+    *,
+    run_date: dt.date | None = None,
+    pipeline_run_id: int | None = None,
+) -> float:
     """Drain the LLM's usage log into the database. Returns the dollars recorded."""
     run_date = run_date or dt.date.today()
     total = 0.0
     for usage in llm.usage:
         session.add(
             ModelCall(
+                pipeline_run_id=pipeline_run_id,
                 run_date=run_date,
                 agent=usage.agent,
                 model=usage.model,

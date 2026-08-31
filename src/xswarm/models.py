@@ -164,6 +164,23 @@ class Publication(Base):
     metrics: Mapped[list[PostMetric]] = relationship(back_populates="publication")
 
 
+class PipelineRun(Base):
+    """One invocation of the ML or care pipeline, so every downstream row can be
+    traced back to the run that produced it."""
+
+    __tablename__ = "pipeline_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stream: Mapped[str] = mapped_column(String(8), index=True)
+    run_date: Mapped[dt.date] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(String(16), default="running")
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+    model_calls: Mapped[list[ModelCall]] = relationship(back_populates="pipeline_run")
+
+
 class ModelCall(Base):
     """One billed model call. Kept per agent so `xswarm cost` can answer "which stage
     is eating the budget" rather than just "we spent $X"."""
@@ -171,6 +188,9 @@ class ModelCall(Base):
     __tablename__ = "model_calls"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    pipeline_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pipeline_runs.id"), index=True
+    )
     run_date: Mapped[dt.date] = mapped_column(index=True)
     agent: Mapped[str] = mapped_column(String(32), index=True)
     model: Mapped[str] = mapped_column(String(64))
@@ -178,6 +198,8 @@ class ModelCall(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    pipeline_run: Mapped[PipelineRun | None] = relationship(back_populates="model_calls")
 
 
 class PostMetric(Base):

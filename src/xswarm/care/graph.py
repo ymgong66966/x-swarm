@@ -6,23 +6,19 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from .. import costs
 from ..config import settings
 from ..db import init_db, session_scope
-from ..llm import LLM
-from ..models import Article, Candidate
+from ..models import STREAM_CARE, Article, Candidate
+from ..pipeline import _last, finish_run, make_llm, spend, start_run
 from . import angle, curator, editor, export, promoter, scout, site, writer
 
 log = logging.getLogger(__name__)
 
 
-def _last(_left, right):
-    return right
-
-
 class CareState(TypedDict, total=False):
     run_date: Annotated[dt.date, _last]
     dry_run: Annotated[bool, _last]
+    pipeline_run_id: Annotated[int | None, _last]
     sources: Annotated[list[str] | None, _last]
     sync_site: Annotated[bool, _last]
     item_ids: Annotated[list[int], _last]
@@ -31,14 +27,6 @@ class CareState(TypedDict, total=False):
     ready_article_ids: Annotated[list[int], _last]
     promo_ids: Annotated[list[int], _last]
     cost_usd: Annotated[float, _last]
-
-
-def _llm(state: CareState) -> LLM:
-    return LLM(dry_run=state.get("dry_run", False))
-
-
-def _spend(session, llm: LLM, state: CareState) -> float:
-    return state.get("cost_usd", 0.0) + costs.record(session, llm, run_date=state["run_date"])
 
 
 def site_node(state: CareState) -> CareState:
@@ -65,7 +53,7 @@ def writer_node(state: CareState) -> CareState:
     """Plan then write, per lead. Kept in one node because a plan is only meaningful
     together with the article it produced."""
     with session_scope() as session:
-        llm = _llm(state)
+        llm = make_llm(state)
         pool = [session.get(Candidate, cid) for cid in state.get("candidate_ids", [])]
         leads = [c for c in pool if c is not None]
         articles: list[Article] = []
@@ -74,7 +62,7 @@ def writer_node(state: CareState) -> CareState:
             articles.append(writer.write(session, plan, llm, state["run_date"]))
         return {
             "article_ids": [a.id for a in articles],
-            "cost_usd": _spend(session, llm, state),
+            "cost_usd": spend(session, llm, state),
         }
 
 
@@ -89,10 +77,10 @@ def editor_node(state: CareState) -> CareState:
 
 def promoter_node(state: CareState) -> CareState:
     with session_scope() as session:
-        llm = _llm(state)
+        llm = make_llm(state)
         articles = [session.get(Article, aid) for aid in state.get("ready_article_ids", [])]
         drafts = promoter.run(session, llm, [a for a in articles if a is not None])
-        return {"promo_ids": [d.id for d in drafts], "cost_usd": _spend(session, llm, state)}
+        return {"promo_ids": [d.id for d in drafts], "cost_usd": spend(session, llm, state)}
 
 
 def build_graph():
@@ -123,11 +111,23 @@ def run_pipeline(
     sync_site: bool = True,
 ) -> CareState:
     init_db()
+    run_date = run_date or dt.date.today()
+    run_id = start_run(STREAM_CARE, run_date)
     initial: CareState = {
-        "run_date": run_date or dt.date.today(),
+        "run_date": run_date,
         "dry_run": dry_run,
+        "pipeline_run_id": run_id,
         "sources": sources,
         "sync_site": sync_site,
         "cost_usd": 0.0,
     }
-    return build_graph().invoke(initial)
+    result: CareState = initial
+    status = "success"
+    try:
+        result = build_graph().invoke(initial)
+        return result
+    except Exception:
+        status = "failed"
+        raise
+    finally:
+        finish_run(run_id, result.get("cost_usd", 0.0), status=status)
