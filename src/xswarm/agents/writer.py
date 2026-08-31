@@ -105,6 +105,50 @@ def write(brief: Brief, llm: LLM, voice: str, playbook: str, recent: str = "") -
     return drafts
 
 
+def revise(session: Session, draft: Draft, llm: LLM, feedback: str) -> Draft:
+    """Rewrite a draft in place, guided by human feedback.
+
+    The reviewer types what they want changed; the model sees the original brief,
+    the current draft, and the feedback, and produces one improved version.
+    """
+    brief = draft.brief
+    if brief is None:
+        raise ValueError(f"draft {draft.id} has no brief to revise from")
+    prompt = (
+        "Revise this X post based on the reviewer's feedback.\n\n"
+        f"CURRENT POST:\n{draft.body}\n\n"
+        f"REVIEWER FEEDBACK:\n{feedback}\n\n"
+        f"BRIEF\n"
+        f"What's new: {brief.whats_new}\n"
+        f"Key number: {brief.key_number}\n"
+        f"Caveat: {brief.caveat}\n"
+        f"Builder takeaway: {brief.builder_takeaway}\n"
+        f"Claims you may make:\n"
+        + "\n".join(f"- {c}" for c in brief.grounded_claims)
+        + f"\n\nVOICE:\n{_read(settings.voice_path)}\n\n"
+        f"RULES:\n"
+        f"- Max {settings.max_post_chars} characters.\n"
+        f"- Keep the same hook_style ({(draft.features or {}).get('hook_style', 'claim')}).\n"
+        f"- No links, no hashtags, no emoji, no em dashes.\n"
+        f"- Never state a number not in the brief.\n\n"
+        f"Reply with JSON only: {{\"body\": \"\", \"alt_text\": \"\"}}"
+    )
+    payload = llm.complete_json(prompt, strong=True, max_tokens=800, agent="writer")
+    if isinstance(payload, dict) and payload.get("body", "").strip():
+        draft.body = _typography(str(payload["body"]))
+        if payload.get("alt_text"):
+            draft.alt_text = str(payload["alt_text"]).strip()
+    draft.status = "ready_for_review"
+    draft.editor_notes = [
+        *(draft.editor_notes or []),
+        f"human feedback: {feedback}",
+        "revised by model",
+    ]
+    session.flush()
+    log.info("revised draft %d with feedback", draft.id)
+    return draft
+
+
 def rewrite(session: Session, draft: Draft, llm: LLM) -> Draft:
     """Write a draft again from its brief, in place.
 

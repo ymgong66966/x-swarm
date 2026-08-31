@@ -21,6 +21,7 @@ dependencies = [
     "matplotlib>=3.8",
     "pillow>=10.3",
     "alembic>=1.13",
+    "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]

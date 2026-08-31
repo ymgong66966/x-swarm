@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     semantic_scholar_api_key: str | None = None
     github_token: str | None = None
     hf_token: str | None = None
+    # Optional: enables web search in the Researcher agent.
+    tavily_api_key: str | None = None
 
     # Ingestion
     arxiv_categories: list[str] = Field(default=["cs.LG", "cs.CL", "cs.AI", "cs.MA"])
