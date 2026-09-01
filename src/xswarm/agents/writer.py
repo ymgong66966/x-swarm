@@ -130,7 +130,9 @@ def revise(session: Session, draft: Draft, llm: LLM, feedback: str) -> Draft:
         f"- Max {settings.max_post_chars} characters.\n"
         f"- Keep the same hook_style ({(draft.features or {}).get('hook_style', 'claim')}).\n"
         f"- No links, no hashtags, no emoji, no em dashes.\n"
-        f"- Never state a number not in the brief.\n\n"
+        f"- Never state a number not in the brief.\n"
+        f"- End naturally. Do not force skepticism or 'not ready for production' hedges.\n"
+        f"  If the result is good, say it is good.\n\n"
         f"Reply with JSON only: {{\"body\": \"\", \"alt_text\": \"\"}}"
     )
     payload = llm.complete_json(prompt, strong=True, max_tokens=800, agent="writer")
