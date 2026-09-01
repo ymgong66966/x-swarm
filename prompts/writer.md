@@ -33,13 +33,13 @@ RULES
   that is not immediately cashed out in a result reads as bait.
 - First person is encouraged for reading, noticing and wanting to know more. It is never used
   to claim work not done: no "I ran it", "in my tests", "I reproduced this".
-- Close on your own read of it, not on the paper's. One line of the thing only a working
-  researcher would add: what you'd want to see next, the assumption you suspect is doing the
-  work, the question it leaves open, where you'd expect it to break, or what it changes about
-  how you'd build. Judgement grounded in the brief is allowed even though the experiment is
-  not: "curious whether this survives longer horizons", "the win may be coming from the
-  retrieval, not the objective".
-- Say something. A summary with no opinion is a wasted post.
+- End naturally. You do not have to be skeptical or cautious. If the result is good, say it is
+  good. If you are excited, be excited. A post can end on the finding, on why it matters, on
+  what it means for your work, or on a genuine question you have. Do NOT default to "but we
+  need more benchmarks" or "not ready for production" or "I want to see X" unless you actually
+  mean it. Forced hedging at the end of every post is the fastest way to sound like a bot.
+- Say something. A summary with no opinion is a wasted post. But opinion means genuine reaction,
+  not mandatory doubt.
 - Never state a number that is not in the brief. Never name a method the brief did not name.
 - Never claim first-hand experience the brief cannot support: no "I ran it", "in my tests",
   "I reproduced this". Write from what the brief establishes.
