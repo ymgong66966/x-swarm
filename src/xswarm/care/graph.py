@@ -6,6 +6,7 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from ..agents import illustrator
 from ..config import settings
 from ..db import init_db, session_scope
 from ..models import STREAM_CARE, Article, Candidate
@@ -75,6 +76,29 @@ def editor_node(state: CareState) -> CareState:
         return {"ready_article_ids": [a.id for a in passed]}
 
 
+def illustrator_node(state: CareState) -> CareState:
+    """Shoot the hero here rather than at publish time. The promos carry the article's
+    photograph, so a picture that only appears when the PR is opened means every draft
+    is reviewed without the image it will ship with."""
+    if state.get("dry_run", False):
+        return {}
+    with session_scope() as session:
+        llm = make_llm(state)
+        for article_id in state.get("ready_article_ids", []):
+            article = session.get(Article, article_id)
+            if article is None or article.hero_path:
+                continue
+            try:
+                drawn = illustrator.illustrate_article(article, llm)
+            except Exception:
+                log.exception("article %s has no hero: the image failed", article_id)
+                continue
+            if drawn is None:
+                continue
+            article.hero_path, article.hero_alt = str(drawn[0]), drawn[1]
+        return {"cost_usd": spend(session, llm, state)}
+
+
 def promoter_node(state: CareState) -> CareState:
     with session_scope() as session:
         llm = make_llm(state)
@@ -90,6 +114,7 @@ def build_graph():
     graph.add_node("curator", curator_node)
     graph.add_node("writer", writer_node)
     graph.add_node("editor", editor_node)
+    graph.add_node("illustrator", illustrator_node)
     graph.add_node("promoter", promoter_node)
 
     graph.add_edge(START, "site")
@@ -97,8 +122,10 @@ def build_graph():
     graph.add_edge("scout", "curator")
     graph.add_edge("curator", "writer")
     graph.add_edge("writer", "editor")
-    # Only articles that cleared the gate get promoted; nothing links to a blocked piece.
-    graph.add_edge("editor", "promoter")
+    # Only articles that cleared the gate get a hero and get promoted; nothing links to
+    # a blocked piece.
+    graph.add_edge("editor", "illustrator")
+    graph.add_edge("illustrator", "promoter")
     graph.add_edge("promoter", END)
     return graph.compile()
 
@@ -123,11 +150,13 @@ def run_pipeline(
     }
     result: CareState = initial
     status = "success"
+    error = ""
     try:
         result = build_graph().invoke(initial)
         return result
-    except Exception:
+    except Exception as exc:
         status = "failed"
+        error = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        finish_run(run_id, result.get("cost_usd", 0.0), status=status)
+        finish_run(run_id, result.get("cost_usd", 0.0), status=status, error=error)

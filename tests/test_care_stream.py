@@ -559,3 +559,62 @@ class _StubLLM:
             "x_posts": [{"body": STUB_CODES}, {"body": STUB_ASSUMES}],
             "linkedin": LONG_LINKEDIN,
         }
+
+
+def test_the_slate_is_not_five_versions_of_one_story(session: Session) -> None:
+    """A reviewer who does not want to publish on today's biggest story should still have
+    something to pick, which ranking on score alone never left them."""
+    for index in range(4):
+        make_item(
+            session,
+            fingerprint=f"dup-{index}",
+            external_id=f"dup-{index}",
+            url=f"https://www.federalregister.gov/documents/dup-{index}",
+            title="CMS caregiver training information collection submitted for OMB review",
+            summary="Caregiver training documentation under codes 97550 and G0541.",
+        )
+    make_item(
+        session,
+        fingerprint="other",
+        external_id="other",
+        source="pubmed",
+        url="https://pubmed.ncbi.nlm.nih.gov/1",
+        title="Discharge readiness and readmission among US dementia caregivers",
+        summary="Caregiver training before discharge and 30 day readmission.",
+        signals={"evidence_kind": "research", "audience_hint": "caregiver"},
+    )
+
+    titles = [c.item.title for c in curator.run(session, run_date=TODAY)]
+    assert any("readmission" in title for title in titles)
+    assert sum("OMB review" in title for title in titles) == 1
+
+
+def test_a_promo_that_only_rewords_its_sibling_is_dropped(session: Session) -> None:
+    class _Echo:
+        def complete_json(self, prompt: str, **kwargs) -> dict:
+            return {
+                "x_posts": [{"body": LONG_HOOK}, {"body": LONG_HOOK.replace("Who", "So who")}],
+                "linkedin": "",
+            }
+
+    drafts = promoter.write(make_article(session), _Echo())
+    assert len(drafts) == 1
+
+
+def test_a_linkedin_post_is_judged_against_the_linkedin_budget() -> None:
+    """Showing a LinkedIn draft against the X limit marked every one of them over."""
+    body = LONG_LINKEDIN
+    assert len(body) > promoter.x_budget()
+    assert promoter.check(Draft(body=body, features={"channel": "linkedin"}, variant=0)) == []
+    too_long = Draft(body=body + " " + body, features={"channel": "linkedin"}, variant=0)
+    assert any("over the" in note for note in promoter.check(too_long))
+
+
+def test_the_hero_is_shot_before_the_promos_are_written() -> None:
+    """The promos carry the article's photograph, so drawing it at publish time meant
+    every draft was reviewed without the image it would ship with."""
+    from xswarm.care import graph
+
+    edges = {(e.source, e.target) for e in graph.build_graph().get_graph().edges}
+    assert ("editor", "illustrator") in edges
+    assert ("illustrator", "promoter") in edges

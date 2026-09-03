@@ -163,11 +163,21 @@ def _one_per_brief(drafts: list[Draft]) -> list[Draft]:
 def run(session: Session, llm: LLM, drafts: list[Draft]) -> list[Asset]:
     # Roundup threads have no single brief to draw from; they ship text-only.
     with_brief = [d for d in drafts if d.brief is not None]
-    assets = [
-        asset
-        for draft in _one_per_brief(with_brief)
-        if (asset := attach_visual(session, draft, llm)) is not None
-    ]
+    assets: list[Asset] = []
+    for draft in _one_per_brief(with_brief):
+        # An image is the last step and the least essential one. A paper that will not
+        # serve its figures, or a provider that is down, costs that draft its picture and
+        # nothing else: the words are already written and reviewed.
+        try:
+            # A savepoint, so a half-written Asset rolls back without taking the images
+            # already attached in this run with it.
+            with session.begin_nested():
+                asset = attach_visual(session, draft, llm)
+        except Exception:
+            log.exception("draft %s ships text-only: the visual failed", draft.id)
+            continue
+        if asset is not None:
+            assets.append(asset)
     session.flush()
     log.info("attached %d visuals", len(assets))
     return assets

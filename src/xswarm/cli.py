@@ -686,6 +686,11 @@ def care_publish_cmd(
         if article is None:
             raise typer.BadParameter(f"no article {article_id}")
         hero_path = Path(hero) if hero else None
+        # The pipeline shoots the hero when the article clears the editor, so publishing
+        # normally ships the picture that was reviewed rather than a fresh one.
+        if hero_path is None and article.hero_path and Path(article.hero_path).is_file():
+            hero_path = Path(article.hero_path)
+            hero_alt = hero_alt or article.hero_alt
         if hero_path is None and illustrate and not dry_run:
             drawn = illustrator.illustrate_article(article, LLM())
             if drawn is None:

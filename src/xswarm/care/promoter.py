@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from rapidfuzz import fuzz
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -38,7 +39,14 @@ DENSE_CHARS = 150
 # A hook with a single line under it is a post nobody stops for. There is room for the
 # substance that earns the click, so the post is expected to use most of it.
 MIN_POST_CHARS = 190
-MIN_LINKEDIN_CHARS = 400
+# LinkedIn tolerates length, readers do not. Anything past this stops being a post with
+# a second thought in it and becomes the article pasted into the feed.
+MIN_LINKEDIN_CHARS = 300
+MAX_LINKEDIN_CHARS = 650
+# Three posts off one article are three angles or they are one post shown three times.
+# The prompt asks for distinct angles and the model still paraphrases itself, so the
+# near-copies are dropped rather than put in front of a reviewer as choices.
+SAME_POST = 72
 # Every link on X costs 23 characters through t.co however long it is, plus the blank
 # line above it. The card link lives outside `body`, so the budget the writer is given
 # has to be the real limit minus that.
@@ -262,6 +270,11 @@ def _fallback_posts(article: Article) -> list[tuple[str, str]]:
     return [(_clean(article.thesis)[: x_budget()], "finding")]
 
 
+def _echoes(body: str, kept: list[tuple[str, str]]) -> bool:
+    """Whether this post is the same point as one already kept, reworded."""
+    return any(fuzz.token_set_ratio(body, other) >= SAME_POST for other, _ in kept)
+
+
 def write(article: Article, llm: LLM) -> list[Draft]:
     takeaways = _takeaways(article)
     payload = llm.complete_json(
@@ -275,6 +288,8 @@ def write(article: Article, llm: LLM) -> list[Draft]:
             variants=settings.care_promos_per_article,
             max_chars=x_budget(),
             min_chars=MIN_POST_CHARS,
+            linkedin_max=MAX_LINKEDIN_CHARS,
+            linkedin_min=MIN_LINKEDIN_CHARS,
         ),
         strong=True,
         max_tokens=1200,
@@ -289,7 +304,7 @@ def write(article: Article, llm: LLM) -> list[Draft]:
             if not isinstance(entry, dict):
                 continue
             body = _break_hook(_clean(str(entry.get("body", ""))))
-            if body:
+            if body and not _echoes(body, posts):
                 posts.append((body, str(entry.get("angle", ANGLES[index % 3]))))
     if not posts:
         posts = _fallback_posts(article)
@@ -417,7 +432,7 @@ def check(draft: Draft) -> list[str]:
     """
     notes: list[str] = []
     linkedin = draft.features.get("channel") == "linkedin"
-    limit = 900 if linkedin else x_budget()
+    limit = MAX_LINKEDIN_CHARS if linkedin else x_budget()
     floor = MIN_LINKEDIN_CHARS if linkedin else MIN_POST_CHARS
     if not draft.body.strip():
         notes.append("empty post")

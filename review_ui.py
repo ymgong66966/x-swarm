@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from xswarm.agents import publisher
 from xswarm.agents.writer import revise
+from xswarm.care import promoter
 from xswarm.db import init_db, session_scope
 from xswarm.llm import LLM
 from xswarm.models import Draft, Publication
@@ -27,6 +28,16 @@ st.set_page_config(
 )
 
 MAX_CHARS = 270
+# A LinkedIn post is written to a different budget than a non-premium X post, so showing
+# both against 270 marks every LinkedIn draft as OVER when it is inside its own limit.
+LINKEDIN_MAX_CHARS = promoter.MAX_LINKEDIN_CHARS
+
+
+def char_limit(draft: Draft | None) -> int:
+    if draft is not None and (draft.features or {}).get("channel") == "linkedin":
+        return LINKEDIN_MAX_CHARS
+    return MAX_CHARS
+
 
 # ---------------------------------------------------------------------------
 # Sidebar filters
@@ -46,15 +57,14 @@ with st.sidebar:
             try:
                 if run_ml:
                     from xswarm.graph import run_pipeline
+
                     result = run_pipeline()
                     cost = result.get("cost_usd", 0)
                     ready = len(result.get("ready_ids", []))
-                    st.success(
-                        f"ML pipeline done! "
-                        f"{ready} drafts ready, ${cost:.3f} spent"
-                    )
+                    st.success(f"ML pipeline done! {ready} drafts ready, ${cost:.3f} spent")
                 else:
                     from xswarm.care.graph import run_pipeline as run_care_pipeline
+
                     result = run_care_pipeline()
                     st.success("Care pipeline done!")
             except Exception as e:
@@ -130,14 +140,24 @@ def source_title(draft: Draft) -> str:
     return ""
 
 
+def _data_uri(path: str) -> str | None:
+    p = Path(path)
+    if not p.exists() or p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+        return None
+    data = base64.b64encode(p.read_bytes()).decode()
+    ext = p.suffix.lower().lstrip(".")
+    return f"data:image/{'jpeg' if ext == 'jpg' else ext};base64,{data}"
+
+
 def image_for_draft(draft: Draft) -> str | None:
     for asset in draft.assets or []:
-        p = Path(asset.path)
-        if p.exists() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
-            data = base64.b64encode(p.read_bytes()).decode()
-            ext = p.suffix.lower().lstrip(".")
-            mime = "jpeg" if ext == "jpg" else ext
-            return f"data:image/{mime};base64,{data}"
+        src = _data_uri(asset.path)
+        if src:
+            return src
+    # A care promo carries no asset of its own: the picture it ships with is the hero of
+    # the article it links to, which X pulls into the link card.
+    if draft.article is not None and draft.article.hero_path:
+        return _data_uri(draft.article.hero_path)
     return None
 
 
@@ -163,12 +183,12 @@ def render_post_html(
     avatar_bg = "#1d9bf0" if stream == "ml" else ("#00ba7c" if stream == "care" else "#f5a623")
     handle = "@ml_frontier" if stream == "ml" else ("@alverna" if stream == "care" else "@you")
     name = (
-        "ML Frontier" if stream == "ml"
-        else ("Alverna Health" if stream == "care" else "Your Post")
+        "ML Frontier" if stream == "ml" else ("Alverna Health" if stream == "care" else "Your Post")
     )
 
     chars = len(body)
-    over = chars > MAX_CHARS
+    limit = char_limit(draft)
+    over = chars > limit
     chars_color = "#f4212e" if over else "#71767b"
 
     bg, fg = badge_color(status)
@@ -177,9 +197,7 @@ def render_post_html(
 
     # Connector line above
     if show_connector_above:
-        parts.append(
-            '<div style="width:2px;height:20px;background:#2f3336;margin:0 auto;"></div>'
-        )
+        parts.append('<div style="width:2px;height:20px;background:#2f3336;margin:0 auto;"></div>')
 
     # Card wrapper
     if is_main:
@@ -189,7 +207,7 @@ def render_post_html(
 
     parts.append(
         f'<div style="background:#000;border:1px solid #2f3336;border-radius:{border_radius};'
-        f'padding:16px;max-width:598px;margin:0 auto;'
+        f"padding:16px;max-width:598px;margin:0 auto;"
         f'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;color:#e7e9ea;">'
     )
 
@@ -198,45 +216,45 @@ def render_post_html(
         parts.append(
             f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'
             f'  <div style="width:40px;height:40px;border-radius:50%;background:{avatar_bg};'
-            f'    display:flex;align-items:center;justify-content:center;font-weight:700;'
+            f"    display:flex;align-items:center;justify-content:center;font-weight:700;"
             f'    font-size:18px;color:#fff;flex-shrink:0;">{avatar_letter}</div>'
             f'  <div style="flex:1;">'
             f'    <div style="font-weight:700;font-size:15px;color:#e7e9ea;">{esc(name)}</div>'
             f'    <div style="font-size:13px;color:#71767b;">{esc(handle)}</div>'
-            f'  </div>'
+            f"  </div>"
             f'  <div style="font-size:13px;color:#71767b;">{esc(created)}</div>'
-            f'</div>'
+            f"</div>"
         )
         # Badge + tags
         parts.append(
             f'<div style="margin-bottom:8px;">'
             f'  <span style="display:inline-block;padding:2px 10px;border-radius:12px;'
             f'    font-size:12px;font-weight:600;background:{bg};color:{fg};">'
-            f'    {esc(status.replace("_", " "))}</span>'
+            f"    {esc(status.replace('_', ' '))}</span>"
         )
         if hook:
             parts.append(
                 f'  <span style="display:inline-block;padding:2px 8px;border-radius:10px;'
-                f'    font-size:11px;background:#16181c;color:#71767b;border:1px solid #2f3336;'
+                f"    font-size:11px;background:#16181c;color:#71767b;border:1px solid #2f3336;"
                 f'    margin-left:4px;">{esc(hook)}</span>'
             )
         if pillar:
             parts.append(
                 f'  <span style="display:inline-block;padding:2px 8px;border-radius:10px;'
-                f'    font-size:11px;background:#16181c;color:#71767b;border:1px solid #2f3336;'
+                f"    font-size:11px;background:#16181c;color:#71767b;border:1px solid #2f3336;"
                 f'    margin-left:4px;">{esc(pillar)}</span>'
             )
         parts.append(
             f'  <span style="display:inline-block;padding:2px 8px;border-radius:10px;'
-            f'    font-size:11px;background:#16181c;color:#71767b;border:1px solid #2f3336;'
+            f"    font-size:11px;background:#16181c;color:#71767b;border:1px solid #2f3336;"
             f'    margin-left:4px;">#{draft.id}</span>'
-            f'</div>'
+            f"</div>"
         )
         # Source reference
         if title:
             parts.append(
                 f'<div style="font-size:12px;color:#71767b;margin-bottom:6px;">'
-                f'Re: {esc(title)}</div>'
+                f"Re: {esc(title)}</div>"
             )
 
     # Thread label
@@ -255,7 +273,7 @@ def render_post_html(
     # Char count
     parts.append(
         f'<div style="font-size:12px;color:{chars_color};text-align:right;'
-        f'margin-bottom:6px;">{chars}/{MAX_CHARS}{"  OVER" if over else ""}</div>'
+        f'margin-bottom:6px;">{chars}/{limit}{"  OVER" if over else ""}</div>'
     )
 
     # Image
@@ -279,7 +297,7 @@ def render_post_html(
 def render_notes_html(notes: list[str]) -> str:
     items = "".join(
         f'<div style="background:#2c1215;border:1px solid #67000d;border-radius:8px;'
-        f'padding:8px 12px;font-size:13px;color:#f4212e;margin:4px 0;'
+        f"padding:8px 12px;font-size:13px;color:#f4212e;margin:4px 0;"
         f'font-family:-apple-system,sans-serif;">{esc(note)}</div>'
         for note in notes
     )
@@ -293,7 +311,7 @@ def render_notes_html(notes: list[str]) -> str:
 st.html(
     f'<div style="max-width:598px;margin:20px auto 8px auto;font-size:20px;'
     f'font-weight:700;color:#e7e9ea;font-family:-apple-system,sans-serif;">'
-    f'Review &middot; {len(drafts)} drafts</div>'
+    f"Review &middot; {len(drafts)} drafts</div>"
 )
 
 # ---------------------------------------------------------------------------
@@ -304,31 +322,37 @@ for draft in drafts:
     image_src = image_for_draft(draft)
 
     # Main post card
-    st.html(render_post_html(
-        draft.body,
-        is_main=True,
-        image_src=image_src,
-        draft=draft,
-    ))
+    st.html(
+        render_post_html(
+            draft.body,
+            is_main=True,
+            image_src=image_src,
+            draft=draft,
+        )
+    )
 
     # Thread posts
     if draft.thread:
         for i, post in enumerate(draft.thread):
-            st.html(render_post_html(
-                post,
-                is_main=False,
-                thread_label=f"Thread {i + 2}/{len(draft.thread) + 1}",
-                show_connector_above=True,
-            ))
+            st.html(
+                render_post_html(
+                    post,
+                    is_main=False,
+                    thread_label=f"Thread {i + 2}/{len(draft.thread) + 1}",
+                    show_connector_above=True,
+                )
+            )
 
     # Link reply
     if draft.link_reply:
-        st.html(render_post_html(
-            draft.link_reply,
-            is_main=False,
-            thread_label="Link reply",
-            show_connector_above=True,
-        ))
+        st.html(
+            render_post_html(
+                draft.link_reply,
+                is_main=False,
+                thread_label="Link reply",
+                show_connector_above=True,
+            )
+        )
 
     # Editor notes
     if draft.editor_notes:
@@ -401,11 +425,7 @@ for draft in drafts:
         # Check if already scheduled
         already_scheduled = False
         with session_scope() as session:
-            pub = (
-                session.query(Publication)
-                .filter(Publication.draft_id == draft.id)
-                .first()
-            )
+            pub = session.query(Publication).filter(Publication.draft_id == draft.id).first()
             if pub:
                 already_scheduled = True
         if already_scheduled:
@@ -444,6 +464,6 @@ with session_scope() as session:
 st.html(
     f'<div style="text-align:center;color:#71767b;font-size:13px;padding:20px 0 40px 0;'
     f'font-family:-apple-system,sans-serif;">'
-    f'Total {total} &middot; Ready {ready} &middot; '
-    f'Approved {approved} &middot; Blocked {blocked}</div>'
+    f"Total {total} &middot; Ready {ready} &middot; "
+    f"Approved {approved} &middot; Blocked {blocked}</div>"
 )
