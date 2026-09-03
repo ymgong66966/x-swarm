@@ -177,6 +177,7 @@ class PipelineRun(Base):
     started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    error: Mapped[str] = mapped_column(Text, default="")
 
     model_calls: Mapped[list[ModelCall]] = relationship(back_populates="pipeline_run")
 
@@ -188,9 +189,7 @@ class ModelCall(Base):
     __tablename__ = "model_calls"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    pipeline_run_id: Mapped[int | None] = mapped_column(
-        ForeignKey("pipeline_runs.id"), index=True
-    )
+    pipeline_run_id: Mapped[int | None] = mapped_column(ForeignKey("pipeline_runs.id"), index=True)
     run_date: Mapped[dt.date] = mapped_column(index=True)
     agent: Mapped[str] = mapped_column(String(32), index=True)
     model: Mapped[str] = mapped_column(String(64))

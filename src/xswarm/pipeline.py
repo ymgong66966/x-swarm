@@ -33,7 +33,8 @@ def make_llm(state: dict[str, Any]) -> LLM:
 def spend(session: Session, llm: LLM, state: dict[str, Any]) -> float:
     """Persist this node's model usage and keep the running total on the state."""
     return state.get("cost_usd", 0.0) + costs.record(
-        session, llm,
+        session,
+        llm,
         run_date=state["run_date"],
         pipeline_run_id=state.get("pipeline_run_id"),
     )
@@ -50,8 +51,9 @@ def start_run(stream: str, run_date: dt.date) -> int:
     return run_id
 
 
-def finish_run(run_id: int, cost_usd: float, *, status: str = "success") -> None:
-    """Close a PipelineRun row."""
+def finish_run(run_id: int, cost_usd: float, *, status: str = "success", error: str = "") -> None:
+    """Close a PipelineRun row. A failed run keeps the exception text, because "failed"
+    on its own sends you digging through logs a week later to find out what broke."""
     with session_scope() as session:
         run = session.get(PipelineRun, run_id)
         if run is None:
@@ -59,5 +61,6 @@ def finish_run(run_id: int, cost_usd: float, *, status: str = "success") -> None
             return
         run.status = status
         run.cost_usd = cost_usd
+        run.error = error[:2000]
         run.finished_at = utcnow()
-    log.info("pipeline run %d finished: %s ($%.4f)", run_id, status, cost_usd)
+    log.info("pipeline run %d finished: %s ($%.4f) %s", run_id, status, cost_usd, error)

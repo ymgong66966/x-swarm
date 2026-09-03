@@ -50,8 +50,10 @@ How it should sound:
 - No hashtags, no emoji, no "🧵", no "thread", no listicles.
 
 Rules that do not bend:
-- Between {min_chars} and {max_chars} characters for X. The LinkedIn post runs 400 to 900
-  characters and has room for a short second thought, not a second article.
+- Between {min_chars} and {max_chars} characters for X. The LinkedIn post runs
+  {linkedin_min} to {linkedin_max} characters, hard limit: a hook, two or three short
+  paragraphs, and it stops. It is one more thought than the X post, not the article
+  rewritten. If it runs long, cut the sentence that repeats the one before it.
 - Numbers, codes and dates only if they appear in the facts above, verbatim.
 - Never promise coverage, payment or a clinical outcome. "may be billable" is the
   strongest form allowed.
@@ -59,6 +61,9 @@ Rules that do not bend:
 - Do not include the link or any URL: it is appended after your text.
 - Each X post takes a different angle: one states what was found, one names the
   operational consequence, one takes on the objection a skeptical reader would raise.
+- The posts must not be interchangeable. Each one opens on a different sentence, leads
+  with a different fact, and would still be worth posting if the others existed. Two
+  posts making the same point with the words shuffled is one post.
 
 Reply with JSON only:
 {{

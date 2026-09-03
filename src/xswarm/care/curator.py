@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import urllib.parse
+from collections import Counter
 
 from rapidfuzz import fuzz
 from sqlalchemy import select
@@ -86,6 +87,15 @@ PILLAR_BY_SOURCE = {
     "forum": "field_signal",
 }
 
+# Two items whose titles are this close are the same story: a rule and the trade write-up
+# of that rule, or the same press release picked up twice. One of them is the day's topic;
+# the other is a duplicate wearing a different headline.
+SAME_STORY = 62
+# A slate the reviewer can actually choose from needs more than one subject in it. Even
+# when the Federal Register has the five best-scoring items of the day, it does not get
+# to be the whole day.
+MAX_PER_SOURCE = 2
+
 AUDIENCE_TERMS = {
     "clinician": ("therapist", "clinician", "nurse", "pathologist", "psychologist", "license"),
     "caregiver": ("family", "caregiver", "loved one", "at home", "dementia", "spouse"),
@@ -157,6 +167,43 @@ def infer_audience(item: Item) -> str:
     return best if counts[best] else "provider"
 
 
+def _diversify(
+    scored: list[tuple[float, dict[str, float], Item]], limit: int
+) -> list[tuple[float, dict[str, float], Item]]:
+    """Take the best items, but not five versions of the best item.
+
+    Ranking on score alone gives a day where every candidate is the same CMS notice, and
+    a reviewer who does not want to publish on that subject has nothing else to pick.
+    A retelling of a story already on the slate is dropped outright. An item held out
+    only by a source or pillar quota is kept back and used to fill the slate when a thin
+    week leaves it short.
+    """
+    max_per_pillar = max(1, limit // 2)
+    picked: list[tuple[float, dict[str, float], Item]] = []
+    deferred: list[tuple[float, dict[str, float], Item]] = []
+    by_source: Counter[str] = Counter()
+    by_pillar: Counter[str] = Counter()
+    for row in scored:
+        item = row[2]
+        pillar = PILLAR_BY_SOURCE.get(item.source, "policy_explainer")
+        title = normalize_title(item.title)
+        duplicate = any(
+            fuzz.token_set_ratio(title, normalize_title(other[2].title)) >= SAME_STORY
+            for other in picked
+        )
+        if duplicate:
+            continue
+        if by_source[item.source] >= MAX_PER_SOURCE or by_pillar[pillar] >= max_per_pillar:
+            deferred.append(row)
+            continue
+        picked.append(row)
+        by_source[item.source] += 1
+        by_pillar[pillar] += 1
+        if len(picked) == limit:
+            return picked
+    return picked + deferred[: limit - len(picked)]
+
+
 def _history(session: Session) -> list[str]:
     cutoff = dt.date.today() - dt.timedelta(days=settings.novelty_window_days)
     rows = session.execute(
@@ -205,7 +252,7 @@ def run(session: Session, run_date: dt.date | None = None) -> list[Candidate]:
 
     scored.sort(key=lambda row: row[0], reverse=True)
     candidates: list[Candidate] = []
-    for total, subscores, item in scored[: settings.care_candidates_per_run]:
+    for total, subscores, item in _diversify(scored, settings.care_candidates_per_run):
         audience = infer_audience(item)
         candidate = Candidate(
             item_id=item.id,

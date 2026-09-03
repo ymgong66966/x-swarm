@@ -19,8 +19,24 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _has(table: str, column: str = "") -> bool:
+    """`init_db()` calls `create_all`, so a database can already carry a table this
+    migration wants to create. Check before touching it rather than fail half way and
+    leave the schema between two revisions, which is how the shared Postgres ended up
+    with `pipeline_runs` but without `model_calls.pipeline_run_id`."""
+    inspector = sa.inspect(op.get_bind())
+    if table not in inspector.get_table_names():
+        return False
+    if not column:
+        return True
+    return column in {col["name"] for col in inspector.get_columns(table)}
+
+
 def upgrade() -> None:
     """Upgrade schema."""
+    if _has("pipeline_runs"):
+        _add_run_id()
+        return
     op.create_table(
         "pipeline_runs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -35,7 +51,12 @@ def upgrade() -> None:
     with op.batch_alter_table("pipeline_runs", schema=None) as batch_op:
         batch_op.create_index(batch_op.f("ix_pipeline_runs_stream"), ["stream"], unique=False)
         batch_op.create_index(batch_op.f("ix_pipeline_runs_run_date"), ["run_date"], unique=False)
+    _add_run_id()
 
+
+def _add_run_id() -> None:
+    if _has("model_calls", "pipeline_run_id"):
+        return
     with op.batch_alter_table("model_calls", schema=None) as batch_op:
         batch_op.add_column(sa.Column("pipeline_run_id", sa.Integer(), nullable=True))
         batch_op.create_foreign_key(

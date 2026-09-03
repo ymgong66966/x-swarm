@@ -125,3 +125,21 @@ def test_a_diagram_is_refused_even_when_the_brief_has_a_number(
     session.flush()
     llm = FakeLLM({"template": "concept_diagram", "stages": ["a", "b"], "title": "How it works"})
     assert visualizer.attach_visual(session, draft, llm) is None
+
+
+def test_a_broken_image_costs_that_draft_its_picture_and_nothing_else(
+    session, brief, tmp_path, monkeypatch
+):
+    """A paper that will not serve its figures used to fail the whole run, which is why
+    a month of pipeline runs produced no posts at all."""
+    monkeypatch.setattr(settings, "assets_dir", tmp_path)
+    draft = make_draft(brief, "body")
+    session.add(draft)
+    session.flush()
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("the image provider is down")
+
+    monkeypatch.setattr(visualizer, "attach_visual", explode)
+    assert visualizer.run(session, LLM(dry_run=True), [draft]) == []
+    assert session.get(type(draft), draft.id) is draft

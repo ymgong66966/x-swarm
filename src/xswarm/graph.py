@@ -162,11 +162,13 @@ def run_pipeline(
     }
     result: PipelineState = initial
     status = "success"
+    error = ""
     try:
         result = build_graph().invoke(initial)
         return result
-    except Exception:
+    except Exception as exc:
         status = "failed"
+        error = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        finish_run(run_id, result.get("cost_usd", 0.0), status=status)
+        finish_run(run_id, result.get("cost_usd", 0.0), status=status, error=error)
