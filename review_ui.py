@@ -12,10 +12,11 @@ from pathlib import Path
 import streamlit as st
 from sqlalchemy import select
 
+from xswarm.agents import publisher
 from xswarm.agents.writer import revise
 from xswarm.db import init_db, session_scope
 from xswarm.llm import LLM
-from xswarm.models import Draft
+from xswarm.models import Draft, Publication
 
 init_db()
 
@@ -325,7 +326,7 @@ for draft in drafts:
             label_visibility="collapsed",
         )
 
-    col_revise, col_approve, col_reject = st.columns([1, 1, 1])
+    col_revise, col_approve, col_reject, col_publish = st.columns([1, 1, 1, 1])
     with col_revise:
         can_revise = bool(draft.brief) and draft.status not in ("approved",)
         if st.button(
@@ -367,6 +368,37 @@ for draft in drafts:
                 reason = feedback or "rejected without reason"
                 d.editor_notes = [*d.editor_notes, f"human: {reason}"]
             st.rerun()
+    with col_publish:
+        # Check if already scheduled
+        already_scheduled = False
+        with session_scope() as session:
+            pub = (
+                session.query(Publication)
+                .filter(Publication.draft_id == draft.id)
+                .first()
+            )
+            if pub:
+                already_scheduled = True
+        if already_scheduled:
+            st.button(
+                "Scheduled",
+                key=f"pub_{draft.id}",
+                disabled=True,
+                use_container_width=True,
+            )
+        elif st.button(
+            "Publish",
+            key=f"pub_{draft.id}",
+            disabled=draft.status != "approved",
+            use_container_width=True,
+        ):
+            with st.spinner("Sending to Typefully..."):
+                try:
+                    with session_scope() as session:
+                        pubs = publisher.run(session, dry_run=False)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Publish failed: {e}")
 
     st.html('<div style="height:24px;"></div>')
 

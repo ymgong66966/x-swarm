@@ -101,10 +101,10 @@ def publish(
     when: dt.datetime,
     *,
     client: TypefullyClient | None = None,
-    plan_only: bool = True,
+    plan_only: bool = False,
 ) -> Publication:
     """Hand one approved draft to Typefully. `plan_only` keeps it inert on the queue
-    until a human confirms — phase-1 autonomy."""
+    until a human confirms; False (the default) schedules it to go out automatically."""
     # Loaded by query rather than through `draft.publication`: a relationship read earlier
     # in this session caches the None from before a dry run wrote its row, and inserting a
     # second publication for one draft violates the unique constraint.
@@ -141,7 +141,7 @@ def resend(
     draft: Draft,
     *,
     client: TypefullyClient | None = None,
-    plan_only: bool = True,
+    plan_only: bool = False,
 ) -> Publication:
     """Push a draft's current text, media and links over the copy already on the queue.
 
@@ -210,7 +210,7 @@ def run(
     session: Session,
     *,
     dry_run: bool = False,
-    plan_only: bool = True,
+    plan_only: bool = False,
     limit: int | None = None,
 ) -> list[Publication]:
     """Schedule everything a human approved (plus any pillar allowed to self-publish)."""
