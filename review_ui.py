@@ -33,6 +33,35 @@ MAX_CHARS = 270
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
+    st.markdown("### Generate")
+    col_ml, col_care = st.columns(2)
+    with col_ml:
+        run_ml = st.button("Run ML", use_container_width=True)
+    with col_care:
+        run_care = st.button("Run Care", use_container_width=True)
+
+    if run_ml or run_care:
+        stream_label = "ML" if run_ml else "Care"
+        with st.spinner(f"Running {stream_label} pipeline (this takes a few minutes)..."):
+            try:
+                if run_ml:
+                    from xswarm.graph import run_pipeline
+                    result = run_pipeline()
+                    cost = result.get("cost_usd", 0)
+                    ready = len(result.get("ready_ids", []))
+                    st.success(
+                        f"ML pipeline done! "
+                        f"{ready} drafts ready, ${cost:.3f} spent"
+                    )
+                else:
+                    from xswarm.care.graph import run_pipeline as run_care_pipeline
+                    result = run_care_pipeline()
+                    st.success("Care pipeline done!")
+            except Exception as e:
+                st.error(f"Pipeline failed: {e}")
+        st.rerun()
+
+    st.divider()
     st.markdown("### Filters")
     STATUS_OPTIONS = ["ready_for_review", "approved", "blocked", "rejected", "drafted"]
     selected_status = st.multiselect("Status", STATUS_OPTIONS, default=["ready_for_review"])
