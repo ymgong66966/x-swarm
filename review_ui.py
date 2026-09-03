@@ -140,14 +140,24 @@ def source_title(draft: Draft) -> str:
     return ""
 
 
+def _data_uri(path: str) -> str | None:
+    p = Path(path)
+    if not p.exists() or p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+        return None
+    data = base64.b64encode(p.read_bytes()).decode()
+    ext = p.suffix.lower().lstrip(".")
+    return f"data:image/{'jpeg' if ext == 'jpg' else ext};base64,{data}"
+
+
 def image_for_draft(draft: Draft) -> str | None:
     for asset in draft.assets or []:
-        p = Path(asset.path)
-        if p.exists() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
-            data = base64.b64encode(p.read_bytes()).decode()
-            ext = p.suffix.lower().lstrip(".")
-            mime = "jpeg" if ext == "jpg" else ext
-            return f"data:image/{mime};base64,{data}"
+        src = _data_uri(asset.path)
+        if src:
+            return src
+    # A care promo carries no asset of its own: the picture it ships with is the hero of
+    # the article it links to, which X pulls into the link card.
+    if draft.article is not None and draft.article.hero_path:
+        return _data_uri(draft.article.hero_path)
     return None
 
 
