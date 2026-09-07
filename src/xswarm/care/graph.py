@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from pathlib import Path
 from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from .. import storage
 from ..agents import illustrator
 from ..config import settings
 from ..db import init_db, session_scope
@@ -96,6 +98,9 @@ def illustrator_node(state: CareState) -> CareState:
             if drawn is None:
                 continue
             article.hero_path, article.hero_alt = str(drawn[0]), drawn[1]
+            article.hero_url = storage.store(
+                drawn[0], f"article-{article.id}/{Path(drawn[0]).name}"
+            )
         return {"cost_usd": spend(session, llm, state)}
 
 

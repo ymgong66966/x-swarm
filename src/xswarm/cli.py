@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
 
-from . import costs
+from . import costs, storage
 from .agents import (
     analyst,
     composer,
@@ -301,6 +301,26 @@ def rewrite_cmd(
         console.print("queued drafts still show the old copy until [bold]xswarm requeue[/bold]")
 
 
+@app.command("revise")
+def revise_cmd(
+    draft_id: int,
+    feedback: str = typer.Argument(..., help="What to change, in your words"),
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Rewrite one draft against a reviewer's note, keeping its row."""
+    _setup_logging(verbose)
+    init_db()
+    llm = LLM(dry_run=dry_run)
+    with session_scope() as session:
+        draft = session.get(Draft, draft_id)
+        if draft is None:
+            raise typer.BadParameter(f"no draft {draft_id}")
+        writer.revise(session, draft, llm, feedback)
+        costs.record(session, llm)
+        console.print(draft.body)
+
+
 @app.command("render")
 def render_cmd(draft_id: list[int] = typer.Option(None), dry_run: bool = False) -> None:
     """Render (or re-render) the visual for specific drafts."""
@@ -310,6 +330,44 @@ def render_cmd(draft_id: list[int] = typer.Option(None), dry_run: bool = False) 
         assets = visualizer.run(session, LLM(dry_run=dry_run), [d for d in drafts if d])
         for asset in assets:
             console.print(f"{asset.kind}: {asset.path}")
+
+
+@app.command("upload-assets")
+def upload_assets_cmd(limit: int = typer.Option(50, help="How many to upload")) -> None:
+    """Copy images this machine still holds into Supabase, so a hosted reviewer sees them.
+
+    Only files that are still on this disk can go up: an image drawn by a run on a runner
+    that has since been deleted is gone, and its draft stays text-only.
+    """
+    init_db()
+    if not storage.configured():
+        raise typer.BadParameter("set XSWARM_SUPABASE_URL and XSWARM_SUPABASE_SERVICE_KEY")
+    uploaded = missing = 0
+    with session_scope() as session:
+        assets = session.scalars(
+            select(Asset).where(Asset.url == "").order_by(Asset.id.desc()).limit(limit)
+        ).all()
+        for asset in assets:
+            if storage.publish(asset):
+                uploaded += 1
+                console.print(f"asset {asset.id}: {asset.url}")
+            else:
+                missing += 1
+        articles = session.scalars(
+            select(Article)
+            .where(Article.hero_url == "", Article.hero_path != "")
+            .order_by(Article.id.desc())
+            .limit(limit)
+        ).all()
+        for article in articles:
+            hero = Path(article.hero_path)
+            article.hero_url = storage.store(hero, f"article-{article.id}/{hero.name}")
+            if article.hero_url:
+                uploaded += 1
+                console.print(f"article {article.id}: {article.hero_url}")
+            else:
+                missing += 1
+    console.print(f"[green]{uploaded} uploaded[/green], {missing} no longer on this disk")
 
 
 @app.command("illustrate")
@@ -349,6 +407,9 @@ def publish_cmd(
         help="Queue the draft in Typefully without auto-publishing, for a human to send.",
     ),
     limit: int = typer.Option(None, help="Cap how many drafts are scheduled"),
+    draft_id: list[int] = typer.Option(
+        None, help="Only these drafts, so approving one post does not flush the rest"
+    ),
     verbose: bool = False,
 ) -> None:
     """Send approved drafts to Typefully at the next free posting slots."""
@@ -357,7 +418,13 @@ def publish_cmd(
     if not settings.typefully_api_key and not dry_run:
         console.print("[yellow]XSWARM_TYPEFULLY_API_KEY unset — dry run[/yellow]")
     with session_scope() as session:
-        publications = publisher.run(session, dry_run=dry_run, plan_only=schedule_only, limit=limit)
+        publications = publisher.run(
+            session,
+            dry_run=dry_run,
+            plan_only=schedule_only,
+            limit=limit,
+            draft_ids=list(draft_id) or None,
+        )
         table = Table("draft", "status", "scheduled_for", "provider id")
         for publication in publications:
             table.add_row(

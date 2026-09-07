@@ -258,12 +258,41 @@ streamlit run review_ui.py            # http://localhost:8501
 ```
 
 It reads the same `XSWARM_*` environment as the CLI, so it needs `XSWARM_DATABASE_URL` to see
-what the scheduled runs produced. To host it (Streamlit Community Cloud installs
+what the scheduled runs produced. To host this one instead (Streamlit Community Cloud installs
 `requirements.txt` and runs `review_ui.py`), put those variables in the app's secrets as TOML —
 `XSWARM_DATABASE_URL = "postgresql+psycopg://..."`, one quoted line each — and add
-`XSWARM_UI_PASSWORD` — without it the page is open to anyone with the URL, and a click there
-posts to a real account. Images live on the disk of whatever machine drew them, so a hosted UI
-shows text where a local one shows the picture.
+`XSWARM_UI_PASSWORD`.
+
+### The hosted one
+
+`ui/` is the same gate as a Next.js app, for a laptop that cannot reach the database — the
+server connects, the browser never does. It is read-and-decide only: it writes the approval
+to the database and then asks this repository's `review-action` workflow to do the scheduling,
+because slots, image upload and per-stream account routing already live in the Python package
+and a request handler is the wrong place to have them a second time. `Run ML` and `Run Care`
+dispatch `daily` and `care-weekly` for the same reason.
+
+Deploy it on Vercel with **Root Directory** `ui`, and give it `XSWARM_DATABASE_URL`,
+`XSWARM_UI_PASSWORD` and `XSWARM_GITHUB_TOKEN` (a fine-grained token with *Actions: read and
+write* on this repository). Without the password the page is open to anyone with the URL, and
+a click there posts to a real account.
+
+### Images a reviewer somewhere else can see
+
+An image drawn by a scheduled run is written to that runner's disk, which is deleted minutes
+later. With `XSWARM_SUPABASE_URL` and `XSWARM_SUPABASE_SERVICE_KEY` set — on the runs, not on
+Vercel — every asset is also copied into a public Supabase bucket (`XSWARM_SUPABASE_BUCKET`,
+`assets` by default, created on first upload) and the row keeps the URL, which is what both
+review UIs show. The service role key writes to any bucket, so it stays server-side: the
+hosted UI only ever reads the resulting public URL out of the database.
+
+An upload that fails is logged and the run carries on with the local file, and
+
+```bash
+xswarm upload-assets            # anything still on this disk that has no URL yet
+```
+
+backfills the images an earlier run left behind, on the machine that still holds them.
 
 ## Publishing
 

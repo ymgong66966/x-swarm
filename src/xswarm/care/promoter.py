@@ -15,6 +15,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from rapidfuzz import fuzz
 from sqlalchemy.orm import Session
 
+from .. import storage
 from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import STREAM_CARE, Article, Asset, Draft
@@ -180,21 +181,23 @@ def attach_hero(session: Session, article: Article) -> int:
     path = hero_file(article)
     if path is None or settings.care_promo_link_card:
         return 0
-    attached = 0
+    attached: list[Asset] = []
     for draft in article.promos:
         if any(asset.path == str(path) for asset in draft.assets):
             continue
-        draft.assets.append(
-            Asset(
-                kind="hero",
-                path=str(path),
-                alt_text=article.hero_alt or article.title,
-                spec={"article_id": article.id},
-            )
+        asset = Asset(
+            kind="hero",
+            path=str(path),
+            url=article.hero_url,
+            alt_text=article.hero_alt or article.title,
+            spec={"article_id": article.id},
         )
-        attached += 1
+        draft.assets.append(asset)
+        attached.append(asset)
     session.flush()
-    return attached
+    for asset in attached:
+        storage.publish(asset)
+    return len(attached)
 
 
 def release(session: Session, article: Article) -> int:

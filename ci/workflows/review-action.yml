@@ -1,0 +1,59 @@
+name: review-action
+
+# What the hosted review UI dispatches when you press a button. Scheduling a post means
+# Typefully slots, image upload and per-stream account routing, all of which already live
+# in this package, so the UI records the decision and this workflow carries it out.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "publish (schedule an approved draft) or revise"
+        type: choice
+        options: [publish, revise]
+        required: true
+      draft_id:
+        description: "Draft to act on"
+        type: string
+        required: true
+      feedback:
+        description: "For revise: what to change"
+        type: string
+        default: ""
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      XSWARM_DATABASE_URL: ${{ secrets.XSWARM_DATABASE_URL }}
+      XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
+      XSWARM_SUPABASE_URL: ${{ secrets.XSWARM_SUPABASE_URL }}
+      XSWARM_SUPABASE_SERVICE_KEY: ${{ secrets.XSWARM_SUPABASE_SERVICE_KEY }}
+      XSWARM_ANTHROPIC_API_KEY: ${{ secrets.XSWARM_ANTHROPIC_API_KEY }}
+      XSWARM_TYPEFULLY_API_KEY: ${{ secrets.XSWARM_TYPEFULLY_API_KEY }}
+      XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID }}
+      XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID: ${{ secrets.XSWARM_TYPEFULLY_ML_SOCIAL_SET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      # Inputs reach the shell through the environment, so a note with a backtick in it
+      # stays a note; the id is checked because it is spliced into a command line.
+      - name: Check the draft id
+        env:
+          DRAFT_ID: ${{ inputs.draft_id }}
+        run: |
+          case "$DRAFT_ID" in
+            ''|*[!0-9]*) echo "draft_id must be a number"; exit 1 ;;
+          esac
+          echo "DRAFT_ID=$DRAFT_ID" >> "$GITHUB_ENV"
+      - name: Schedule the draft
+        if: ${{ inputs.action == 'publish' }}
+        run: xswarm publish --draft-id "$DRAFT_ID" --verbose
+      - name: Rewrite the draft
+        if: ${{ inputs.action == 'revise' }}
+        env:
+          FEEDBACK: ${{ inputs.feedback }}
+        run: xswarm revise "$DRAFT_ID" "$FEEDBACK" --verbose

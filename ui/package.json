@@ -1,0 +1,22 @@
+{
+  "name": "x-swarm-review-ui",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "15.5.2",
+    "pg": "8.16.3",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "@types/pg": "8.15.4",
+    "@types/react": "19.1.9",
+    "typescript": "5.8.3"
+  }
+}

@@ -13,6 +13,7 @@ from pathlib import Path
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from .. import storage
 from ..config import settings
 from ..imagegen import ArtSpec, art_direction, generate
 from ..llm import LLM, load_prompt
@@ -172,5 +173,6 @@ def illustrate(session: Session, draft: Draft, llm: LLM) -> Asset | None:
         spec=spec.model_dump(),
     )
     session.add(asset)
+    storage.publish(asset)
     draft.alt_text = asset.alt_text
     return asset
