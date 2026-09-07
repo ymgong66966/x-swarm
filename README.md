@@ -258,11 +258,22 @@ streamlit run review_ui.py            # http://localhost:8501
 ```
 
 It reads the same `XSWARM_*` environment as the CLI, so it needs `XSWARM_DATABASE_URL` to see
-what the scheduled runs produced. To host it (Streamlit Community Cloud installs
-`requirements.txt` and runs `review_ui.py`), put those variables in the app's secrets and add
-`XSWARM_UI_PASSWORD` — without it the page is open to anyone with the URL, and a click there
-posts to a real account. Images live on the disk of whatever machine drew them, so a hosted UI
-shows text where a local one shows the picture.
+what the scheduled runs produced.
+
+### The hosted one
+
+`ui/` is the same gate as a Next.js app, for a laptop that cannot reach the database — the
+server connects, the browser never does. It is read-and-decide only: it writes the approval
+to the database and then asks this repository's `review-action` workflow to do the scheduling,
+because slots, image upload and per-stream account routing already live in the Python package
+and a request handler is the wrong place to have them a second time. `Run ML` and `Run Care`
+dispatch `daily` and `care-weekly` for the same reason.
+
+Deploy it on Vercel with **Root Directory** `ui`, and give it `XSWARM_DATABASE_URL`,
+`XSWARM_UI_PASSWORD` and `XSWARM_GITHUB_TOKEN` (a fine-grained token with *Actions: read and
+write* on this repository). Without the password the page is open to anyone with the URL, and
+a click there posts to a real account. Images drawn by a run live on the disk of the machine
+that drew them, so the hosted page shows a paper's own figure and a note in place of the rest.
 
 ## Publishing
 

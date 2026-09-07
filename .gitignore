@@ -9,3 +9,7 @@ __pycache__/
 assets/
 content/articles/
 dashboard.html
+node_modules/
+.next/
+.vercel/
+*.tsbuildinfo

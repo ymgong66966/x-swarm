@@ -301,6 +301,26 @@ def rewrite_cmd(
         console.print("queued drafts still show the old copy until [bold]xswarm requeue[/bold]")
 
 
+@app.command("revise")
+def revise_cmd(
+    draft_id: int,
+    feedback: str = typer.Argument(..., help="What to change, in your words"),
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Rewrite one draft against a reviewer's note, keeping its row."""
+    _setup_logging(verbose)
+    init_db()
+    llm = LLM(dry_run=dry_run)
+    with session_scope() as session:
+        draft = session.get(Draft, draft_id)
+        if draft is None:
+            raise typer.BadParameter(f"no draft {draft_id}")
+        writer.revise(session, draft, llm, feedback)
+        costs.record(session, llm)
+        console.print(draft.body)
+
+
 @app.command("render")
 def render_cmd(draft_id: list[int] = typer.Option(None), dry_run: bool = False) -> None:
     """Render (or re-render) the visual for specific drafts."""
@@ -349,6 +369,9 @@ def publish_cmd(
         help="Queue the draft in Typefully without auto-publishing, for a human to send.",
     ),
     limit: int = typer.Option(None, help="Cap how many drafts are scheduled"),
+    draft_id: list[int] = typer.Option(
+        None, help="Only these drafts, so approving one post does not flush the rest"
+    ),
     verbose: bool = False,
 ) -> None:
     """Send approved drafts to Typefully at the next free posting slots."""
@@ -357,7 +380,13 @@ def publish_cmd(
     if not settings.typefully_api_key and not dry_run:
         console.print("[yellow]XSWARM_TYPEFULLY_API_KEY unset — dry run[/yellow]")
     with session_scope() as session:
-        publications = publisher.run(session, dry_run=dry_run, plan_only=schedule_only, limit=limit)
+        publications = publisher.run(
+            session,
+            dry_run=dry_run,
+            plan_only=schedule_only,
+            limit=limit,
+            draft_ids=list(draft_id) or None,
+        )
         table = Table("draft", "status", "scheduled_for", "provider id")
         for publication in publications:
             table.add_row(
