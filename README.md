@@ -259,7 +259,8 @@ streamlit run review_ui.py            # http://localhost:8501
 
 It reads the same `XSWARM_*` environment as the CLI, so it needs `XSWARM_DATABASE_URL` to see
 what the scheduled runs produced. To host it (Streamlit Community Cloud installs
-`requirements.txt` and runs `review_ui.py`), put those variables in the app's secrets and add
+`requirements.txt` and runs `review_ui.py`), put those variables in the app's secrets as TOML —
+`XSWARM_DATABASE_URL = "postgresql+psycopg://..."`, one quoted line each — and add
 `XSWARM_UI_PASSWORD` — without it the page is open to anyone with the URL, and a click there
 posts to a real account. Images live on the disk of whatever machine drew them, so a hosted UI
 shows text where a local one shows the picture.

@@ -13,12 +13,31 @@ from pathlib import Path
 import streamlit as st
 from sqlalchemy import select
 
-from xswarm.agents import publisher
-from xswarm.agents.writer import revise
-from xswarm.care import promoter
-from xswarm.db import init_db, session_scope
-from xswarm.llm import LLM
-from xswarm.models import Draft, Publication
+
+def adopt_secrets() -> None:
+    """Copy a hosted app's secrets into the environment.
+
+    Streamlit Cloud hands configuration to the app through `st.secrets`, while the
+    settings object reads the environment once, at import. Without this the hosted UI
+    silently falls back to the bundled SQLite file instead of the shared database.
+    """
+    try:
+        secrets = dict(st.secrets)
+    except Exception:  # no secrets file at all, which is the local case
+        return
+    for key, value in secrets.items():
+        if key.startswith("XSWARM_") and isinstance(value, str):
+            os.environ.setdefault(key, value)
+
+
+adopt_secrets()
+
+from xswarm.agents import publisher  # noqa: E402
+from xswarm.agents.writer import revise  # noqa: E402
+from xswarm.care import promoter  # noqa: E402
+from xswarm.db import init_db, session_scope  # noqa: E402
+from xswarm.llm import LLM  # noqa: E402
+from xswarm.models import Draft, Publication  # noqa: E402
 
 st.set_page_config(
     page_title="x-swarm review",
