@@ -246,6 +246,24 @@ Images you pass with `--image` are copied into `assets/` and used as-is; otherwi
 Illustrator draws one. `xswarm ingest schedule` refuses any draft that is not `approved` —
 that gate is not bypassable by flags.
 
+## The review UI
+
+`review_ui.py` is the card-by-card review surface: every waiting draft with its image and its
+character count, and the buttons that revise, approve, reject or retry it. Approving is the
+whole gate, so the post goes onto the Typefully queue from that click.
+
+```bash
+pip install -e . streamlit
+streamlit run review_ui.py            # http://localhost:8501
+```
+
+It reads the same `XSWARM_*` environment as the CLI, so it needs `XSWARM_DATABASE_URL` to see
+what the scheduled runs produced. To host it (Streamlit Community Cloud installs
+`requirements.txt` and runs `review_ui.py`), put those variables in the app's secrets and add
+`XSWARM_UI_PASSWORD` — without it the page is open to anyone with the URL, and a click there
+posts to a real account. Images live on the disk of whatever machine drew them, so a hosted UI
+shows text where a local one shows the picture.
+
 ## Publishing
 
 `xswarm publish` sends **approved** drafts to Typefully as `publish_at` drafts: they go out by

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import html as html_mod
+import os
 from pathlib import Path
 
 import streamlit as st
@@ -19,13 +20,36 @@ from xswarm.db import init_db, session_scope
 from xswarm.llm import LLM
 from xswarm.models import Draft, Publication
 
-init_db()
-
 st.set_page_config(
     page_title="x-swarm review",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
+
+
+def locked() -> bool:
+    """Whether to stop here and ask for the passphrase.
+
+    Approving a draft sends it to a real account, so a UI reachable from the internet
+    needs a door. Set `XSWARM_UI_PASSWORD` to hang one; leave it unset to run open, which
+    is what a laptop wants.
+    """
+    expected = os.getenv("XSWARM_UI_PASSWORD", "")
+    if not expected or st.session_state.get("unlocked"):
+        return False
+    typed = st.text_input("Passphrase", type="password")
+    if typed and typed == expected:
+        st.session_state["unlocked"] = True
+        return False
+    if typed:
+        st.error("Not that one.")
+    return True
+
+
+if locked():
+    st.stop()
+
+init_db()
 
 MAX_CHARS = 270
 # A LinkedIn post is written to a different budget than a non-premium X post, so showing
