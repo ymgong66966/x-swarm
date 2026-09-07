@@ -8,7 +8,7 @@ from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import memory
+from .. import figures, memory
 from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import STREAM_ML, Candidate, Item
@@ -83,6 +83,16 @@ def score_visualizability(item: Item) -> float:
     cues = ("architecture", "pipeline", "benchmark", "ablation", "%", "speedup", "x faster")
     hits = sum(cue in text for cue in cues)
     return min(1.0, 0.3 + 0.15 * hits)
+
+
+def has_own_figure(item: Item) -> bool:
+    """Whether the source carries figures of its own that a post could show.
+
+    A paper has diagrams its authors drew; a link roundup or a release note usually does
+    not, and the rule against inventing an illustration sends those out as plain text.
+    """
+    urls = (item.url or "", str(item.signals.get("paper_url") or ""))
+    return any(figures.paper_id(url) for url in urls)
 
 
 def score_relevance(item: Item, llm: LLM) -> tuple[float, str]:
@@ -171,7 +181,9 @@ def run(session: Session, llm: LLM, run_date: dt.date | None = None) -> list[Can
             total *= 0.4
         scored.append((total, subscores, rationale, item))
 
-    scored.sort(key=lambda row: row[0], reverse=True)
+    # Between two items the scores cannot separate, take the one whose authors already
+    # drew the picture: the alternative is a text-only post, not a nicer illustration.
+    scored.sort(key=lambda row: (round(row[0], 2), has_own_figure(row[3])), reverse=True)
     candidates: list[Candidate] = []
     for total, subscores, rationale, item in scored[: settings.candidates_per_day]:
         candidate = Candidate(
