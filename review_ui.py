@@ -380,6 +380,10 @@ for draft in drafts:
         )
 
     col_revise, col_approve, col_reject, col_publish = st.columns([1, 1, 1, 1])
+    failure = st.session_state.pop(f"err_{draft.id}", "")
+    if failure:
+        # Outside the button columns, or the message wraps at fifteen characters.
+        st.error(failure)
     with col_revise:
         can_revise = bool(draft.brief) and draft.status not in ("approved",)
         if st.button(
@@ -414,8 +418,10 @@ for draft in drafts:
                     with session_scope() as session:
                         publisher.run(session, draft_ids=[draft.id])
                 except Exception as e:
-                    st.error(f"Approved, but Typefully refused it: {e}")
-                    st.stop()
+                    # The draft stays approved and unsent, so Publish can try again.
+                    st.session_state[f"err_{draft.id}"] = (
+                        f"Approved, but Typefully refused it: {e}. Press Publish to try again."
+                    )
             st.rerun()
     with col_reject:
         if st.button(
@@ -454,9 +460,9 @@ for draft in drafts:
                 try:
                     with session_scope() as session:
                         publisher.run(session, dry_run=False, draft_ids=[draft.id])
-                    st.rerun()
                 except Exception as e:
-                    st.error(f"Publish failed: {e}")
+                    st.session_state[f"err_{draft.id}"] = f"Publish failed: {e}"
+                st.rerun()
 
     st.html('<div style="height:24px;"></div>')
 

@@ -51,6 +51,7 @@ brief fields directly — so the graph, the DB, and the editor gate are all exer
 | `xswarm ingest add <link\|file\|text>` | Your own material → thread + visual, held for review |
 | `xswarm ingest schedule 12` | Queue an **approved** ingest draft in Typefully |
 | `xswarm publish` | Queue approved drafts in Typefully at the next free slots |
+| `xswarm arm` | Make already-queued `planned` drafts send themselves, without touching their copy or slot |
 | `xswarm requeue 15` | Rewrite drafts already on the Typefully queue from their current text, image and links |
 | `xswarm sync-metrics` | Pull X analytics for published posts |
 | `xswarm strategy` | Aggregate performance and rewrite `playbook.md` |
@@ -247,12 +248,14 @@ that gate is not bypassable by flags.
 
 ## Publishing
 
-`xswarm publish` sends **approved** drafts to Typefully as `plan_at` drafts: they sit on the
-queue at a real time but never go out unattended. Drop `--schedule-only` once you trust the
-output, or list pillars in `XSWARM_AUTOPUBLISH_PILLARS` to let low-risk curation posts skip
-review. Slots come from `XSWARM_PUBLISH_SLOTS` with ±7 min of jitter, skipping any slot within
-45 minutes of something already queued. The link reply is posted as the second post in the
-thread. Without `XSWARM_TYPEFULLY_API_KEY` the Publisher records intent and stops.
+`xswarm publish` sends **approved** drafts to Typefully as `publish_at` drafts: they go out by
+themselves at their slot, because approval already was the human gate. `--schedule-only` uses
+`plan_at` instead, which holds the slot but waits for someone to press schedule in Typefully;
+`xswarm arm` converts anything left in that state. List pillars in `XSWARM_AUTOPUBLISH_PILLARS`
+to let low-risk curation posts skip review. Slots come from `XSWARM_PUBLISH_SLOTS` with ±7 min
+of jitter, skipping any slot within 45 minutes of something already queued. The link reply is
+posted as the second post in the thread. Without `XSWARM_TYPEFULLY_API_KEY` the Publisher
+records intent and stops.
 
 Each stream posts to its own X account, chosen by `draft.stream`, never by asking Typefully
 which accounts exist: `care` goes to `XSWARM_TYPEFULLY_CARE_SOCIAL_SET_ID` (the Alverna
