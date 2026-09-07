@@ -174,6 +174,35 @@ def resend(
     return publication
 
 
+def arm(
+    session: Session,
+    publication: Publication,
+    *,
+    client: TypefullyClient | None = None,
+) -> Publication:
+    """Turn a merely planned draft into one that sends itself at its own time.
+
+    Everything queued before the switch to `publish_at` sits in Typefully waiting for a
+    human to press schedule, which is the click this queue exists to remove. Re-sending
+    the time as `publish_at` arms it in place, keeping its slot, copy and provider id.
+    """
+    if not publication.provider_draft_id:
+        raise ValueError(f"draft {publication.draft_id} was never sent to a provider")
+    if publication.published_at or publication.status == "published":
+        raise ValueError(f"draft {publication.draft_id} already went out")
+    when = publication.scheduled_for
+    if when is None:
+        raise ValueError(f"draft {publication.draft_id} has no time to publish at")
+    if client is None:
+        log.info("dry run: would arm typefully %s", publication.provider_draft_id)
+        return publication
+    client.arm_draft(publication.provider_draft_id, when)
+    publication.status = "scheduled"
+    session.flush()
+    log.info("armed typefully %s for %s", publication.provider_draft_id, when.isoformat())
+    return publication
+
+
 class StreamClients:
     """One Typefully client per stream, so a draft can only reach its own X account.
 
@@ -212,13 +241,19 @@ def run(
     dry_run: bool = False,
     plan_only: bool = False,
     limit: int | None = None,
+    draft_ids: list[int] | None = None,
 ) -> list[Publication]:
-    """Schedule everything a human approved (plus any pillar allowed to self-publish)."""
-    approved = list(
-        session.scalars(select(Draft).where(Draft.status == "approved").order_by(Draft.created_at))
-    )
+    """Schedule everything a human approved (plus any pillar allowed to self-publish).
+
+    `draft_ids` narrows that to specific drafts, which is what approving a single post in
+    the review UI does: the other approved drafts keep waiting for their own click.
+    """
+    query = select(Draft).where(Draft.status == "approved").order_by(Draft.created_at)
+    if draft_ids is not None:
+        query = query.where(Draft.id.in_(draft_ids))
+    approved = list(session.scalars(query))
     approved = [d for d in approved if _unsent(d)]
-    if settings.autopublish_pillars:
+    if settings.autopublish_pillars and draft_ids is None:
         auto = [
             d
             for d in session.scalars(

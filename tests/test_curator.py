@@ -47,6 +47,19 @@ def test_keyword_relevance_prefers_on_lane(session):
     assert curator._keyword_relevance(on_lane) > curator._keyword_relevance(off_lane)
 
 
+def test_a_tie_goes_to_the_source_with_its_own_figure(session):
+    repo = _item(session, "Agent inference latency study")
+    repo.url = "https://github.com/acme/agent"
+    paper = _item(session, "Agent inference latency study, again")
+    paper.url = "https://arxiv.org/abs/2501.01234"
+    session.flush()
+
+    candidates = curator.run(session, LLM(dry_run=True))
+
+    assert [c.item_id for c in candidates][0] == paper.id
+    assert curator.has_own_figure(paper) and not curator.has_own_figure(repo)
+
+
 def test_run_shortlists_and_persists(session):
     for index in range(12):
         _item(session, f"Agent inference latency study {index}", hf_upvotes=index * 10)

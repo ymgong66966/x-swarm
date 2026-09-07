@@ -9,6 +9,7 @@ one.
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
 import struct
@@ -22,6 +23,8 @@ log = logging.getLogger(__name__)
 
 ARXIV_RE = re.compile(r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})", re.I)
 HF_PAPER_RE = re.compile(r"huggingface\.co/papers/(\d{4}\.\d{4,5})", re.I)
+REPO_RE = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)", re.I)
+MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)")
 
 FIGURE_RE = re.compile(r"<figure\b[^>]*>(.*?)</figure>", re.I | re.S)
 IMG_RE = re.compile(r"<img\b[^>]*?src=\"([^\"]+)\"", re.I)
@@ -114,14 +117,71 @@ def _get(client: httpx.Client, url: str) -> httpx.Response | None:
     return response if response.status_code == 200 else None
 
 
-def fetch(url: str, dest: Path, *, client: httpx.Client | None = None) -> Figure | None:
-    """The paper's own best figure, saved to `dest`, or None when there isn't one."""
-    identifier = paper_id(url)
-    if not identifier:
+def _save(client: httpx.Client, image_url: str, dest: Path) -> Path | None:
+    """The image at `image_url`, saved next to `dest`, unless it is icon-sized."""
+    image = _get(client, image_url)
+    if image is None:
         return None
+    size = _dimensions(image.content)
+    if not size or size[0] < MIN_WIDTH or size[1] < MIN_HEIGHT:
+        return None
+    dest = dest.with_suffix(Path(image_url.split("?")[0]).suffix.lower())
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(image.content)
+    return dest
+
+
+def _readme(client: httpx.Client, owner: str, repo: str) -> str | None:
+    response = _get(client, f"https://api.github.com/repos/{owner}/{repo}/readme")
+    if response is None:
+        return None
+    try:
+        return base64.b64decode(response.json().get("content", "")).decode("utf-8", "replace")
+    except (ValueError, KeyError):
+        return None
+
+
+def repo_figure(url: str, dest: Path, *, client: httpx.Client) -> Figure | None:
+    """A project's own diagram, taken from its README.
+
+    A repo has no paper to pull a figure from, but the maintainers usually drew the
+    architecture themselves and put it at the top of the README. A README that only links
+    a paper is followed to that paper instead; one with neither leaves the post text-only.
+    """
+    match = REPO_RE.search(url or "")
+    if not match:
+        return None
+    owner, repo = match.group(1), match.group(2).removesuffix(".git")
+    readme = _readme(client, owner, repo)
+    if not readme:
+        return None
+    for alt, image_url in MD_IMAGE_RE.findall(readme):
+        absolute = image_url
+        if not image_url.startswith("http"):
+            absolute = (
+                f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{image_url.lstrip('./')}"
+            )
+        if Path(absolute.split("?")[0]).suffix.lower() not in RASTER:
+            continue
+        saved = _save(client, absolute, dest)
+        if saved is not None:
+            caption = alt.strip() or f"Diagram from the {owner}/{repo} README"
+            return Figure(path=saved, caption=caption, source_url=absolute)
+    # The README's own paper is the next best thing the authors drew.
+    paper = paper_id(readme)
+    if paper:
+        return fetch(f"https://arxiv.org/abs/{paper}", dest, client=client)
+    return None
+
+
+def fetch(url: str, dest: Path, *, client: httpx.Client | None = None) -> Figure | None:
+    """The best figure the authors themselves drew, saved to `dest`, or None."""
+    identifier = paper_id(url)
     owned = client is None
     client = client or httpx.Client(headers={"User-Agent": "xswarm/1.0"})
     try:
+        if not identifier:
+            return repo_figure(url, dest, client=client)
         for page in (
             f"https://arxiv.org/html/{identifier}v1",
             f"https://ar5iv.labs.arxiv.org/html/{identifier}",
@@ -133,17 +193,11 @@ def fetch(url: str, dest: Path, *, client: httpx.Client | None = None) -> Figure
             # arXiv serves /html/<id>v1 whose directory is /html/, and its sources start
             # with the id, so adding a trailing slash here doubles the id and 404s.
             for image_url, caption in candidates(response.text, str(response.url)):
-                image = _get(client, image_url)
-                if image is None:
+                saved = _save(client, image_url, dest)
+                if saved is None:
                     continue
-                size = _dimensions(image.content)
-                if not size or size[0] < MIN_WIDTH or size[1] < MIN_HEIGHT:
-                    continue
-                dest = dest.with_suffix(Path(image_url.split("?")[0]).suffix.lower())
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(image.content)
                 log.info("figure for %s: %s", identifier, image_url)
-                return Figure(path=dest, caption=caption, source_url=image_url)
+                return Figure(path=saved, caption=caption, source_url=image_url)
         return None
     finally:
         if owned:

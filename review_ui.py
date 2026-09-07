@@ -380,6 +380,10 @@ for draft in drafts:
         )
 
     col_revise, col_approve, col_reject, col_publish = st.columns([1, 1, 1, 1])
+    failure = st.session_state.pop(f"err_{draft.id}", "")
+    if failure:
+        # Outside the button columns, or the message wraps at fifteen characters.
+        st.error(failure)
     with col_revise:
         can_revise = bool(draft.brief) and draft.status not in ("approved",)
         if st.button(
@@ -402,11 +406,22 @@ for draft in drafts:
             disabled=draft.status == "approved",
             use_container_width=True,
         ):
-            with session_scope() as session:
-                d = session.get(Draft, draft.id)
-                d.status = "approved"
-                if feedback:
-                    d.editor_notes = [*d.editor_notes, f"human: {feedback}"]
+            # Approving is the whole gate: the post goes straight onto the Typefully
+            # queue, scheduled to send itself, with no second click anywhere.
+            with st.spinner("Approving and scheduling in Typefully..."):
+                with session_scope() as session:
+                    d = session.get(Draft, draft.id)
+                    d.status = "approved"
+                    if feedback:
+                        d.editor_notes = [*d.editor_notes, f"human: {feedback}"]
+                try:
+                    with session_scope() as session:
+                        publisher.run(session, draft_ids=[draft.id])
+                except Exception as e:
+                    # The draft stays approved and unsent, so Publish can try again.
+                    st.session_state[f"err_{draft.id}"] = (
+                        f"Approved, but Typefully refused it: {e}. Press Publish to try again."
+                    )
             st.rerun()
     with col_reject:
         if st.button(
@@ -444,10 +459,10 @@ for draft in drafts:
             with st.spinner("Sending to Typefully..."):
                 try:
                     with session_scope() as session:
-                        pubs = publisher.run(session, dry_run=False)
-                    st.rerun()
+                        publisher.run(session, dry_run=False, draft_ids=[draft.id])
                 except Exception as e:
-                    st.error(f"Publish failed: {e}")
+                    st.session_state[f"err_{draft.id}"] = f"Publish failed: {e}"
+                st.rerun()
 
     st.html('<div style="height:24px;"></div>')
 

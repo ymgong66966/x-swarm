@@ -233,7 +233,7 @@ def ingest_add_cmd(
 def ingest_schedule_cmd(
     draft_id: int,
     dry_run: bool = False,
-    schedule_only: bool = typer.Option(True, help="Queue in Typefully without auto-publishing"),
+    schedule_only: bool = typer.Option(False, help="Queue in Typefully without auto-publishing"),
 ) -> None:
     """Schedule one approved ingest draft. Approve it first with `xswarm approve`."""
     init_db()
@@ -345,8 +345,8 @@ def illustrate_cmd(
 def publish_cmd(
     dry_run: bool = False,
     schedule_only: bool = typer.Option(
-        True,
-        help="Queue the draft in Typefully without auto-publishing (phase-1 autonomy).",
+        False,
+        help="Queue the draft in Typefully without auto-publishing, for a human to send.",
     ),
     limit: int = typer.Option(None, help="Cap how many drafts are scheduled"),
     verbose: bool = False,
@@ -365,6 +365,46 @@ def publish_cmd(
                 publication.status,
                 publication.scheduled_for.isoformat() if publication.scheduled_for else "",
                 publication.provider_draft_id or "",
+            )
+        console.print(table)
+
+
+@app.command("arm")
+def arm_cmd(
+    draft_ids: list[int] = typer.Argument(None, help="Drafts to arm; default: everything planned"),
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Make already-queued drafts send themselves, instead of waiting for a human click.
+
+    Anything queued before this became the default sits in Typefully as `planned`: it
+    holds its slot but never goes out. This re-sends the same time as `publish_at`, which
+    arms it in place without touching the copy, the image or the provider id.
+    """
+    _setup_logging(verbose)
+    init_db()
+    if not settings.typefully_api_key and not dry_run:
+        console.print("[yellow]XSWARM_TYPEFULLY_API_KEY unset — dry run[/yellow]")
+        dry_run = True
+    clients = publisher.StreamClients(dry_run=dry_run)
+    table = Table("draft", "provider id", "scheduled_for", "result")
+    with session_scope() as session:
+        query = select(Publication).where(Publication.status == "planned")
+        if draft_ids:
+            query = query.where(Publication.draft_id.in_(draft_ids))
+        for publication in session.scalars(query.order_by(Publication.draft_id)):
+            draft = session.get(Draft, publication.draft_id)
+            try:
+                client = clients.get(draft.stream) if draft else None
+                publisher.arm(session, publication, client=client)
+                result = "[green]scheduled[/green]" if client else "dry run"
+            except (ValueError, TypefullyError) as error:
+                result = f"[red]{error}[/red]"
+            table.add_row(
+                str(publication.draft_id),
+                publication.provider_draft_id or "",
+                publication.scheduled_for.isoformat() if publication.scheduled_for else "",
+                result,
             )
         console.print(table)
 
