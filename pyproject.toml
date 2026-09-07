@@ -8,7 +8,8 @@ dependencies = [
     "langchain-core>=0.3.0",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
-    "sqlalchemy>=2.0",
+    # Early 2.0 releases fail to resolve `Mapped[list[str]]` written as a string annotation.
+    "sqlalchemy>=2.0.25",
     "psycopg[binary]>=3.1",
     "httpx>=0.27",
     "feedparser>=6.0",
