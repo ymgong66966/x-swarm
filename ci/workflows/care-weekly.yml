@@ -24,6 +24,8 @@ jobs:
     env:
       XSWARM_DATABASE_URL: ${{ secrets.XSWARM_DATABASE_URL }}
       XSWARM_OPENAI_API_KEY: ${{ secrets.XSWARM_OPENAI_API_KEY }}
+      XSWARM_SUPABASE_URL: ${{ secrets.XSWARM_SUPABASE_URL }}
+      XSWARM_SUPABASE_SERVICE_KEY: ${{ secrets.XSWARM_SUPABASE_SERVICE_KEY }}
       XSWARM_ANTHROPIC_API_KEY: ${{ secrets.XSWARM_ANTHROPIC_API_KEY }}
       # Wider than the 80 columns rich assumes off a terminal, so titles are readable.
       COLUMNS: "160"
