@@ -6,7 +6,7 @@ import re
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from .. import figures
+from .. import figures, storage
 from ..config import settings
 from ..llm import LLM, load_prompt
 from ..models import Asset, Brief, Draft
@@ -95,6 +95,7 @@ def visualize(
         spec=spec.model_dump(),
     )
     session.add(asset)
+    storage.publish(asset)
     # Alt text must describe what was actually drawn, not what the Writer imagined.
     draft.alt_text = asset.alt_text
     return asset
@@ -127,6 +128,7 @@ def attach_figure(session: Session, draft: Draft, llm: LLM) -> Asset | None:
         spec={"caption": figure.caption, "source_url": figure.source_url},
     )
     session.add(asset)
+    storage.publish(asset)
     draft.alt_text = asset.alt_text
     return asset
 

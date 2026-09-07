@@ -17,6 +17,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from .. import storage
 from ..agents import editor, publisher
 from ..agents.illustrator import illustrate
 from ..config import settings
@@ -133,6 +134,7 @@ def attach_images(session: Session, draft: Draft, paths: list[Path], alt: str) -
             spec={"original": str(source)},
         )
         session.add(asset)
+        storage.publish(asset)
         assets.append(asset)
     if assets:
         draft.alt_text = alt[:1000]

@@ -137,6 +137,8 @@ class Asset(Base):
     draft_id: Mapped[int] = mapped_column(ForeignKey("drafts.id"), index=True)
     kind: Mapped[str] = mapped_column(String(32))
     path: Mapped[str] = mapped_column(Text)
+    # Where the same image can be read from off this machine, once it has been uploaded.
+    url: Mapped[str] = mapped_column(Text, default="")
     alt_text: Mapped[str] = mapped_column(Text, default="")
     spec: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -268,6 +270,9 @@ class Article(Base):
     # The banner photograph on disk, so the promo posts can carry the same image the
     # article page shows, and its alt text.
     hero_path: Mapped[str] = mapped_column(Text, default="")
+    # The same photograph, readable from anywhere, for reviewers who are not on the
+    # machine that drew it.
+    hero_url: Mapped[str] = mapped_column(Text, default="")
     hero_alt: Mapped[str] = mapped_column(Text, default="")
     # The pull request on the site repo. Set when we open it, before anything is live.
     site_pr_url: Mapped[str | None] = mapped_column(Text)

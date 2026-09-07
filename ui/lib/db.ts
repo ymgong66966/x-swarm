@@ -64,18 +64,21 @@ export async function drafts(status: string, stream: string): Promise<DraftRow[]
     `select d.id, d.stream, d.status, d.variant, d.body, d.thread, d.link_reply,
             d.card_url, d.alt_text, d.features, d.editor_notes, d.created_at,
             a.title as article_title, a.published_url as article_url,
-            -- Only a figure taken from a paper has a URL a browser can load; anything
-            -- drawn by a run is a file on the disk of the machine that drew it.
-            asset.spec->>'source_url' as figure_url,
+            -- The uploaded copy first: it is the image the post will actually carry.
+            -- A paper's own figure already lives on the web, and a care promo that
+            -- links its article as a card has no asset of its own but shows its hero.
+            coalesce(nullif(asset.url, ''), asset.spec->>'source_url',
+                     nullif(a.hero_url, '')) as figure_url,
             asset.spec->>'caption' as figure_caption,
             p.status as publication_status, p.scheduled_for, p.post_url
        from ${SCHEMA}.drafts d
        left join ${SCHEMA}.articles a on a.id = d.article_id
        left join ${SCHEMA}.publications p on p.draft_id = d.id
        left join lateral (
-            select spec from ${SCHEMA}.assets
-             where draft_id = d.id and spec::jsonb ? 'source_url'
-             order by id desc limit 1
+            select url, spec from ${SCHEMA}.assets
+             where draft_id = d.id
+               and (url <> '' or spec::jsonb ? 'source_url')
+             order by (url <> '') desc, id desc limit 1
        ) asset on true
        ${where}
       order by d.created_at desc, d.id desc

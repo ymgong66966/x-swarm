@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
 
-from . import costs
+from . import costs, storage
 from .agents import (
     analyst,
     composer,
@@ -330,6 +330,44 @@ def render_cmd(draft_id: list[int] = typer.Option(None), dry_run: bool = False) 
         assets = visualizer.run(session, LLM(dry_run=dry_run), [d for d in drafts if d])
         for asset in assets:
             console.print(f"{asset.kind}: {asset.path}")
+
+
+@app.command("upload-assets")
+def upload_assets_cmd(limit: int = typer.Option(50, help="How many to upload")) -> None:
+    """Copy images this machine still holds into Supabase, so a hosted reviewer sees them.
+
+    Only files that are still on this disk can go up: an image drawn by a run on a runner
+    that has since been deleted is gone, and its draft stays text-only.
+    """
+    init_db()
+    if not storage.configured():
+        raise typer.BadParameter("set XSWARM_SUPABASE_URL and XSWARM_SUPABASE_SERVICE_KEY")
+    uploaded = missing = 0
+    with session_scope() as session:
+        assets = session.scalars(
+            select(Asset).where(Asset.url == "").order_by(Asset.id.desc()).limit(limit)
+        ).all()
+        for asset in assets:
+            if storage.publish(asset):
+                uploaded += 1
+                console.print(f"asset {asset.id}: {asset.url}")
+            else:
+                missing += 1
+        articles = session.scalars(
+            select(Article)
+            .where(Article.hero_url == "", Article.hero_path != "")
+            .order_by(Article.id.desc())
+            .limit(limit)
+        ).all()
+        for article in articles:
+            hero = Path(article.hero_path)
+            article.hero_url = storage.store(hero, f"article-{article.id}/{hero.name}")
+            if article.hero_url:
+                uploaded += 1
+                console.print(f"article {article.id}: {article.hero_url}")
+            else:
+                missing += 1
+    console.print(f"[green]{uploaded} uploaded[/green], {missing} no longer on this disk")
 
 
 @app.command("illustrate")

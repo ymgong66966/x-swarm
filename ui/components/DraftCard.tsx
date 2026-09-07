@@ -56,7 +56,8 @@ export function DraftCard({ draft }: { draft: DraftRow }) {
         <img className="figure" src={draft.figure_url} alt={draft.alt_text} />
       ) : (
         <p className="notice">
-          No figure a browser can load. Images drawn by a run live on that machine&apos;s disk.
+          No image on this post. One drawn before uploads were configured stayed on the disk
+          of the machine that drew it.
         </p>
       )}
 

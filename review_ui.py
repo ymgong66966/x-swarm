@@ -175,13 +175,15 @@ def _data_uri(path: str) -> str | None:
 
 def image_for_draft(draft: Draft) -> str | None:
     for asset in draft.assets or []:
-        src = _data_uri(asset.path)
+        # The local file when this is the machine that drew it, the uploaded copy when
+        # it is not.
+        src = _data_uri(asset.path) or (asset.url or None)
         if src:
             return src
     # A care promo carries no asset of its own: the picture it ships with is the hero of
     # the article it links to, which X pulls into the link card.
     if draft.article is not None and draft.article.hero_path:
-        return _data_uri(draft.article.hero_path)
+        return _data_uri(draft.article.hero_path) or (draft.article.hero_url or None)
     return None
 
 

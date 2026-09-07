@@ -109,6 +109,12 @@ class Settings(BaseSettings):
 
     # Visuals
     assets_dir: Path = REPO_ROOT / "assets"
+    # An image drawn by a scheduled run lives on that runner's disk, which no reviewer can
+    # reach. With these set, every asset is also copied into a public Supabase bucket and
+    # the row keeps the URL. Unset, everything works as before and stays local.
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+    supabase_bucket: str = "assets"
     visual_width_px: int = 1600
     visual_height_px: int = 900
     # "render" = deterministic matplotlib only; "generate" = text-to-image only;
