@@ -258,7 +258,10 @@ streamlit run review_ui.py            # http://localhost:8501
 ```
 
 It reads the same `XSWARM_*` environment as the CLI, so it needs `XSWARM_DATABASE_URL` to see
-what the scheduled runs produced.
+what the scheduled runs produced. To host this one instead (Streamlit Community Cloud installs
+`requirements.txt` and runs `review_ui.py`), put those variables in the app's secrets as TOML —
+`XSWARM_DATABASE_URL = "postgresql+psycopg://..."`, one quoted line each — and add
+`XSWARM_UI_PASSWORD`.
 
 ### The hosted one
 
