@@ -402,11 +402,20 @@ for draft in drafts:
             disabled=draft.status == "approved",
             use_container_width=True,
         ):
-            with session_scope() as session:
-                d = session.get(Draft, draft.id)
-                d.status = "approved"
-                if feedback:
-                    d.editor_notes = [*d.editor_notes, f"human: {feedback}"]
+            # Approving is the whole gate: the post goes straight onto the Typefully
+            # queue, scheduled to send itself, with no second click anywhere.
+            with st.spinner("Approving and scheduling in Typefully..."):
+                with session_scope() as session:
+                    d = session.get(Draft, draft.id)
+                    d.status = "approved"
+                    if feedback:
+                        d.editor_notes = [*d.editor_notes, f"human: {feedback}"]
+                try:
+                    with session_scope() as session:
+                        publisher.run(session, draft_ids=[draft.id])
+                except Exception as e:
+                    st.error(f"Approved, but Typefully refused it: {e}")
+                    st.stop()
             st.rerun()
     with col_reject:
         if st.button(
@@ -444,7 +453,7 @@ for draft in drafts:
             with st.spinner("Sending to Typefully..."):
                 try:
                     with session_scope() as session:
-                        pubs = publisher.run(session, dry_run=False)
+                        publisher.run(session, dry_run=False, draft_ids=[draft.id])
                     st.rerun()
                 except Exception as e:
                     st.error(f"Publish failed: {e}")

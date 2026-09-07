@@ -270,3 +270,82 @@ def test_run_leaves_a_draft_approved_when_its_account_is_missing(session, brief,
     assert publisher.run(session) == []
     assert draft.status == "approved"
     assert draft.publication is None
+
+
+def test_run_can_schedule_one_approved_draft_alone(session, brief, monkeypatch):
+    """Approving a post in the review UI sends that post, not everyone else's backlog."""
+    monkeypatch.setattr(settings, "typefully_api_key", None)
+    first = make_draft(brief, "the one just approved")
+    first.status = "approved"
+    other = make_draft(brief, "approved earlier, still waiting")
+    other.variant = 1
+    other.status = "approved"
+    session.add_all([first, other])
+    session.flush()
+
+    publications = publisher.run(session, dry_run=True, draft_ids=[first.id])
+
+    assert [p.draft_id for p in publications] == [first.id]
+
+
+def test_a_scheduled_post_sends_itself(session, brief):
+    """`publish_at`, not `plan_at`: a planned draft sits in Typefully until a human
+    clicks schedule, which is the step the queue exists to remove."""
+    draft = make_draft(brief, "the post")
+    draft.status = "approved"
+    session.add(draft)
+    session.flush()
+    client = FakeClient()
+
+    publication = publisher.publish(
+        session, draft, dt.datetime(2026, 8, 20, 17, 0, tzinfo=ET), client=client
+    )
+
+    assert client.drafts[0][1]["plan_only"] is False
+    assert publication.status == "scheduled"
+
+
+class FakeArmClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.armed = []
+
+    def arm_draft(self, draft_id, publish_at):
+        self.armed.append((draft_id, publish_at))
+        return {"id": draft_id, "status": "scheduled"}
+
+
+def test_arm_puts_an_older_planned_draft_on_the_schedule(session, brief):
+    draft = make_draft(brief, "queued before the switch")
+    draft.status = "scheduled"
+    session.add(draft)
+    session.flush()
+    when = dt.datetime(2026, 8, 20, 17, 0, tzinfo=ET)
+    publication = Publication(
+        draft_id=draft.id, status="planned", provider_draft_id="tf-9", scheduled_for=when
+    )
+    session.add(publication)
+    session.flush()
+    client = FakeArmClient()
+
+    publisher.arm(session, publication, client=client)
+
+    assert client.armed == [("tf-9", when)]
+    assert publication.status == "scheduled"
+
+
+def test_arm_refuses_a_post_that_already_went_out(session, brief):
+    draft = make_draft(brief, "already out")
+    session.add(draft)
+    session.flush()
+    publication = Publication(
+        draft_id=draft.id,
+        status="published",
+        provider_draft_id="tf-9",
+        scheduled_for=dt.datetime(2026, 8, 20, 17, 0, tzinfo=ET),
+    )
+    session.add(publication)
+    session.flush()
+
+    with pytest.raises(ValueError):
+        publisher.arm(session, publication, client=FakeArmClient())

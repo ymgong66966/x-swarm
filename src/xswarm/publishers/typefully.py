@@ -190,6 +190,18 @@ class TypefullyClient:
             "PATCH", f"/social-sets/{self.social_set_id}/drafts/{draft_id}", json=payload
         )
 
+    def arm_draft(self, draft_id: str, publish_at: dt.datetime) -> dict:
+        """Move a planned draft onto the schedule without touching its content.
+
+        A planned draft holds a slot but waits for a human to press schedule; sending the
+        same time back as `publish_at` is what makes Typefully send it by itself.
+        """
+        return self._request(
+            "PATCH",
+            f"/social-sets/{self.social_set_id}/drafts/{draft_id}",
+            json={"publish_at": publish_at.isoformat()},
+        )
+
     def analytics_posts(
         self, start_date: dt.date, end_date: dt.date, *, limit: int = 100
     ) -> list[dict]:

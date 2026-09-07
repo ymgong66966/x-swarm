@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import struct
 import zlib
 
@@ -99,3 +100,57 @@ def test_arxiv_relative_sources_resolve_like_a_browser(tmp_path):
     figure = figures.fetch(PAPER, tmp_path / "f.png", client=client)
     assert figure is not None
     assert figure.source_url == "https://arxiv.org/html/2608.13560v1/figures/f1.png"
+
+
+REPO = "https://github.com/acme/agentkit"
+
+
+def readme(body: str) -> httpx.Response:
+    return httpx.Response(200, json={"content": base64.b64encode(body.encode()).decode()})
+
+
+def test_a_repo_ships_the_diagram_from_its_readme(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.github.com":
+            return readme("# agentkit\n![The routing loop](docs/arch.png)\n")
+        return httpx.Response(200, content=png(1200, 700))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    figure = figures.fetch(REPO, tmp_path / "f.png", client=client)
+    assert figure is not None
+    assert figure.caption == "The routing loop"
+    assert figure.source_url == "https://raw.githubusercontent.com/acme/agentkit/HEAD/docs/arch.png"
+
+
+def test_a_repo_readme_without_a_picture_falls_back_to_its_paper(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.github.com":
+            return readme("# agentkit\nRead the paper: https://arxiv.org/abs/2608.13560\n")
+        if request.url.path.endswith(".png"):
+            return httpx.Response(200, content=png(1200, 700))
+        return httpx.Response(200, text=HTML)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    figure = figures.fetch(REPO, tmp_path / "f.png", client=client)
+    assert figure is not None
+    assert figure.caption == "Figure 1: Overview of our method."
+
+
+def test_a_repo_with_neither_picture_nor_paper_stays_text_only(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.github.com":
+            return readme("# agentkit\nJust prose, and a badge ![ci](badge.svg)\n")
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert figures.fetch(REPO, tmp_path / "f.png", client=client) is None
+
+
+def test_a_readme_logo_is_too_small_to_ship(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.github.com":
+            return readme("![logo](logo.png)")
+        return httpx.Response(200, content=png(120, 60))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert figures.fetch(REPO, tmp_path / "f.png", client=client) is None
